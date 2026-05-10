@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Shield, ClipboardList } from "lucide-react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import Link from "next/link";
@@ -23,6 +23,8 @@ const regions = [
   "축산면",
 ];
 
+type SortType = "todo" | "number";
+
 interface Zone {
   firestoreId: string;
   id?: number;
@@ -35,12 +37,11 @@ export default function Home() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [search, setSearch] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
+  const [sortType, setSortType] = useState<SortType>("todo");
 
   useEffect(() => {
     async function fetchZones() {
       try {
-        console.log("Firebase 요청 시작");
-
         const querySnapshot = await getDocs(collection(db, "zones"));
 
         const zoneData = querySnapshot.docs.map((doc) => ({
@@ -59,19 +60,31 @@ export default function Home() {
 
         visitSnapshot.docs.forEach((doc) => {
           const log = doc.data();
-          const zoneId = log.zoneId;
 
-          if (zoneId && !latestVisitMap.has(zoneId)) {
-            latestVisitMap.set(zoneId, log.createdAt);
-          }
+          const keys = [
+            log.zoneId ? String(log.zoneId) : null,
+            log.zoneNumber ? String(log.zoneNumber) : null,
+            log.zoneName ? String(log.zoneName) : null,
+          ].filter(Boolean) as string[];
+
+          keys.forEach((key) => {
+            if (!latestVisitMap.has(key)) {
+              latestVisitMap.set(key, log.createdAt);
+            }
+          });
         });
 
-        const zoneDataWithVisit = zoneData.map((zone) => ({
-          ...zone,
-          lastVisitedAt: latestVisitMap.get(zone.firestoreId),
-        }));
+        const zoneDataWithVisit = zoneData.map((zone) => {
+          const latestVisit =
+            latestVisitMap.get(zone.firestoreId) ||
+            latestVisitMap.get(String(zone.id)) ||
+            latestVisitMap.get(zone.name);
 
-        zoneDataWithVisit.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+          return {
+            ...zone,
+            lastVisitedAt: latestVisit,
+          };
+        });
 
         setZones(zoneDataWithVisit);
       } catch (error) {
@@ -82,15 +95,22 @@ export default function Home() {
     fetchZones();
   }, []);
 
-  const filteredZones = zones.filter((zone) => {
-    const matchesSearch =
-      zone.name.includes(search) || String(zone.id).includes(search);
+  const filteredZones = useMemo(() => {
+    const filtered = zones.filter((zone) => {
+      const matchesSearch =
+        zone.name.includes(search) || String(zone.id ?? "").includes(search);
 
-    const matchesRegion =
-      selectedRegion === "전체" ? true : zone.region === selectedRegion;
+      const matchesRegion =
+        selectedRegion === "전체" ? true : zone.region === selectedRegion;
 
-    return matchesSearch && matchesRegion;
-  });
+      const matchesSort =
+        sortType === "todo" ? !zone.lastVisitedAt?.seconds : true;
+
+      return matchesSearch && matchesRegion && matchesSort;
+    });
+
+    return [...filtered].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+  }, [zones, search, selectedRegion, sortType]);
 
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
@@ -135,7 +155,33 @@ export default function Home() {
           />
         </div>
 
-        <Tabs defaultValue="전체" className="mb-4">
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setSortType("todo")}
+            className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+              sortType === "todo"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-600"
+            }`}
+          >
+            방문할 곳
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSortType("number")}
+            className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+              sortType === "number"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-600"
+            }`}
+          >
+            번호순
+          </button>
+        </div>
+
+        <Tabs defaultValue="전체" className="mb-3">
           <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
             {regions.map((region) => (
               <TabsTrigger
@@ -188,7 +234,13 @@ export default function Home() {
                       {zone.lastVisitedAt?.seconds
                         ? new Date(
                             zone.lastVisitedAt.seconds * 1000
-                          ).toLocaleString()
+                          ).toLocaleString("ko-KR", {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
                         : "방문 기록 없음"}
                     </div>
                   </div>
