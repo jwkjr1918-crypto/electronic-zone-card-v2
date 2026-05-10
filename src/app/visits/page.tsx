@@ -1,6 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { db, auth } from "@/firebase/firebase";
+
 import { useEffect, useMemo, useState } from "react";
+
 import Link from "next/link";
 
 import {
@@ -11,6 +16,7 @@ import {
   doc,
   deleteDoc,
   writeBatch,
+  getDoc,
 } from "firebase/firestore";
 
 import {
@@ -21,9 +27,8 @@ import {
   ClipboardList,
   ChevronDown,
   ChevronUp,
+  LogOut,
 } from "lucide-react";
-
-import { db } from "@/firebase/firebase";
 
 interface VisitLog {
   id: string;
@@ -40,6 +45,47 @@ export default function VisitsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openZone, setOpenZone] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [role, setRole] = useState<"admin" | "leader" | null>(null);
+
+  const router = useRouter();
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      try {
+        const userRef = doc(db, "users", user.uid);
+
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) {
+          await signOut(auth);
+
+          router.push("/login");
+
+          return;
+        }
+
+        const userRole = userSnap.data().role;
+
+        setRole(userRole);
+
+        setCheckingAuth(false);
+      } catch (error) {
+        console.error("권한 확인 에러:", error);
+
+        router.push("/login");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   useEffect(() => {
     async function fetchVisitLogs() {
@@ -104,6 +150,7 @@ export default function VisitsPage() {
       );
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
+
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
@@ -129,38 +176,90 @@ export default function VisitsPage() {
       await batch.commit();
 
       setVisitLogs([]);
+
       setOpenZone(null);
 
       alert("전체 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("전체 삭제 에러:", error);
+
       alert("전체 삭제 실패");
     } finally {
       setDeletingAll(false);
     }
   }
 
+  async function handleLogout() {
+    try {
+      await signOut(auth);
+
+      router.push("/login");
+    } catch (error) {
+      console.error("로그아웃 에러:", error);
+
+      alert("로그아웃 실패");
+    }
+  }
+
   function formatDate(createdAt: any) {
     if (!createdAt?.seconds) return "시간 없음";
 
-    return new Date(createdAt.seconds * 1000).toLocaleString();
+    return new Date(
+      createdAt.seconds * 1000
+    ).toLocaleString();
+  }
+
+  if (checkingAuth) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow">
+          로그인 확인 중...
+        </div>
+      </main>
+    );
   }
 
   return (
     <main className="min-h-screen bg-slate-100 p-3">
       <div className="mx-auto max-w-5xl">
-        <Link
-          href="/admin"
-          className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
-        >
-          <ArrowLeft size={16} />
-          관리자 페이지로 돌아가기
-        </Link>
+
+        <div className="mb-3 flex items-center justify-between gap-2">
+
+          {role === "admin" ? (
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
+            >
+              <ArrowLeft size={16} />
+              관리자 페이지로 돌아가기
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
+            >
+              <ArrowLeft size={16} />
+              메인으로 돌아가기
+            </Link>
+          )}
+
+          <button
+            onClick={handleLogout}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
+          >
+            <LogOut size={16} />
+            로그아웃
+          </button>
+
+        </div>
 
         <div className="mb-4 rounded-2xl bg-slate-900 p-5 text-white shadow">
           <div className="flex items-center gap-2 text-slate-300">
             <ClipboardList size={18} />
-            <p className="text-sm">전자구역 방문 관리</p>
+
+            <p className="text-sm">
+              전자구역 방문 관리
+            </p>
           </div>
 
           <div className="mt-3 flex items-end justify-between gap-3">
@@ -170,7 +269,8 @@ export default function VisitsPage() {
               </h1>
 
               <p className="mt-1 text-sm text-slate-300">
-                총 {visitLogs.length}개 기록 / {groupedLogs.length}개 구역
+                총 {visitLogs.length}개 기록 /{" "}
+                {groupedLogs.length}개 구역
               </p>
             </div>
 
@@ -213,7 +313,8 @@ export default function VisitsPage() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                          {latestLog.zoneNumber ?? latestLog.zoneId}.
+                          {latestLog.zoneNumber ??
+                            latestLog.zoneId}.
                         </span>
 
                         <span className="truncate text-base font-bold text-slate-900">
@@ -233,7 +334,9 @@ export default function VisitsPage() {
 
                         <span className="flex items-center gap-1">
                           <Clock3 size={13} />
-                          {formatDate(latestLog.createdAt)}
+                          {formatDate(
+                            latestLog.createdAt
+                          )}
                         </span>
                       </div>
                     </div>
@@ -256,17 +359,25 @@ export default function VisitsPage() {
                             <div className="min-w-0 text-sm">
                               <div className="flex items-center gap-1 text-slate-500">
                                 <Clock3 size={14} />
+
                                 {formatDate(log.createdAt)}
                               </div>
                             </div>
 
                             <button
-                              onClick={() => handleDeleteLog(log)}
-                              disabled={deletingId === log.id}
+                              onClick={() =>
+                                handleDeleteLog(log)
+                              }
+                              disabled={
+                                deletingId === log.id
+                              }
                               className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-red-500 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                             >
                               <Trash2 size={13} />
-                              {deletingId === log.id ? "삭제 중" : "삭제"}
+
+                              {deletingId === log.id
+                                ? "삭제 중"
+                                : "삭제"}
                             </button>
                           </div>
                         ))}

@@ -9,6 +9,9 @@ import {
   getDocs,
   doc,
   deleteDoc,
+  addDoc,
+  serverTimestamp,
+  getDoc,
 } from "firebase/firestore";
 
 import {
@@ -17,12 +20,10 @@ import {
   MapPinned,
   ClipboardList,
   ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
 
-import {
-  onAuthStateChanged,
-  signOut,
-} from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 
 import { db, auth } from "@/firebase/firebase";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,13 +54,43 @@ export default function AdminPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState("전체");
+  const [selectedZones, setSelectedZones] = useState<string[]>([]);
+  const [role, setRole] = useState<"admin" | "leader" | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         router.push("/login");
-      } else {
+        return;
+      }
+
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) {
+          alert("권한 정보가 없습니다.");
+          await signOut(auth);
+          router.push("/login");
+          return;
+        }
+
+        const userRole = userSnap.data().role;
+
+        if (userRole !== "admin" && userRole !== "leader") {
+          alert("허용되지 않은 권한입니다.");
+          await signOut(auth);
+          router.push("/login");
+          return;
+        }
+
+        setRole(userRole);
         setCheckingAuth(false);
+      } catch (error) {
+        console.error("권한 확인 에러:", error);
+        alert("권한 확인 실패");
+        await signOut(auth);
+        router.push("/login");
       }
     });
 
@@ -91,10 +122,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     const handleScroll = () => {
-      sessionStorage.setItem(
-        "adminScrollY",
-        window.scrollY.toString()
-      );
+      sessionStorage.setItem("adminScrollY", window.scrollY.toString());
     };
 
     window.addEventListener("scroll", handleScroll);
@@ -106,15 +134,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!loading && zones.length > 0) {
-      const lastEditedZoneId =
-        sessionStorage.getItem("lastEditedZoneId");
+      const lastEditedZoneId = sessionStorage.getItem("lastEditedZoneId");
 
       if (!lastEditedZoneId) return;
 
       setTimeout(() => {
-        const target = document.getElementById(
-          `zone-${lastEditedZoneId}`
-        );
+        const target = document.getElementById(`zone-${lastEditedZoneId}`);
 
         if (target) {
           target.scrollIntoView({
@@ -127,15 +152,78 @@ export default function AdminPage() {
   }, [loading, zones]);
 
   const filteredZones = zones.filter((zone) => {
-    return selectedRegion === "전체"
-      ? true
-      : zone.region === selectedRegion;
+    return selectedRegion === "전체" ? true : zone.region === selectedRegion;
   });
 
-  async function handleDeleteZone(zone: Zone) {
-    const ok = confirm(
-      `${zone.id}번 ${zone.name} 구역을 삭제할까요?`
+  const allFilteredSelected =
+    filteredZones.length > 0 &&
+    filteredZones.every((zone) => selectedZones.includes(zone.firestoreId));
+
+  function toggleZone(zoneId: string) {
+    setSelectedZones((prev) =>
+      prev.includes(zoneId)
+        ? prev.filter((id) => id !== zoneId)
+        : [...prev, zoneId]
     );
+  }
+
+  function toggleAllFilteredZones() {
+    if (allFilteredSelected) {
+      setSelectedZones((prev) =>
+        prev.filter(
+          (id) => !filteredZones.some((zone) => zone.firestoreId === id)
+        )
+      );
+    } else {
+      setSelectedZones((prev) => {
+        const next = new Set(prev);
+
+        filteredZones.forEach((zone) => {
+          next.add(zone.firestoreId);
+        });
+
+        return Array.from(next);
+      });
+    }
+  }
+
+  async function handleBulkVisitComplete() {
+    if (selectedZones.length === 0) {
+      alert("선택된 구역이 없습니다.");
+      return;
+    }
+
+    const ok = confirm(`${selectedZones.length}개 구역을 방문완료 처리할까요?`);
+
+    if (!ok) return;
+
+    try {
+      const targetZones = zones.filter((zone) =>
+        selectedZones.includes(zone.firestoreId)
+      );
+
+      await Promise.all(
+        targetZones.map((zone) =>
+          addDoc(collection(db, "visitLogs"), {
+            zoneId: zone.firestoreId,
+            zoneName: zone.name,
+            zoneNumber: zone.id,
+            createdAt: serverTimestamp(),
+          })
+        )
+      );
+
+      alert("방문완료 처리되었습니다.");
+
+      setSelectedZones([]);
+    } catch (error) {
+      console.error("다중 방문완료 에러:", error);
+      alert("처리 실패");
+    }
+  }
+
+  async function handleDeleteZone(zone: Zone) {
+    const ok = confirm(`${zone.id}번 ${zone.name} 구역을 삭제할까요?`);
 
     if (!ok) return;
 
@@ -146,6 +234,10 @@ export default function AdminPage() {
 
       setZones((prev) =>
         prev.filter((item) => item.firestoreId !== zone.firestoreId)
+      );
+
+      setSelectedZones((prev) =>
+        prev.filter((id) => id !== zone.firestoreId)
       );
     } catch (error) {
       console.error("구역 삭제 에러:", error);
@@ -173,6 +265,11 @@ export default function AdminPage() {
     );
   }
 
+  if (role === "leader") {
+    router.push("/visits");
+    return null;
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-5xl">
@@ -190,9 +287,7 @@ export default function AdminPage() {
             <span className="text-sm">전자구역 관리자</span>
           </div>
 
-          <h1 className="mt-3 text-3xl font-bold">
-            관리자 페이지
-          </h1>
+          <h1 className="mt-3 text-3xl font-bold">관리자 페이지</h1>
 
           <p className="mt-2 text-sm text-slate-300">
             구역 정보와 방문 기록을 관리하는 화면입니다.
@@ -212,9 +307,7 @@ export default function AdminPage() {
               <MapPinned size={22} />
             </div>
 
-            <h2 className="text-lg font-bold">
-              구역 관리
-            </h2>
+            <h2 className="text-lg font-bold">구역 관리</h2>
 
             <p className="mt-2 text-sm text-slate-500">
               구역 목록을 확인하고 수정할 수 있습니다.
@@ -229,9 +322,7 @@ export default function AdminPage() {
               <ClipboardList size={22} />
             </div>
 
-            <h2 className="text-lg font-bold">
-              방문 기록 관리
-            </h2>
+            <h2 className="text-lg font-bold">방문 기록 관리</h2>
 
             <p className="mt-2 text-sm text-slate-500">
               저장된 방문 기록을 확인하고 관리할 수 있습니다.
@@ -243,9 +334,7 @@ export default function AdminPage() {
               <Settings size={22} />
             </div>
 
-            <h2 className="text-lg font-bold">
-              설정
-            </h2>
+            <h2 className="text-lg font-bold">설정</h2>
 
             <p className="mt-2 text-sm text-slate-500">
               관리자 기능을 단계적으로 추가할 예정입니다.
@@ -255,11 +344,9 @@ export default function AdminPage() {
       </div>
 
       <section className="mt-6 rounded-3xl bg-white p-5 shadow">
-        <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h2 className="text-xl font-bold">
-              구역 목록
-            </h2>
+            <h2 className="text-xl font-bold">구역 목록</h2>
 
             <p className="text-sm text-slate-500">
               Firebase에 저장된 구역 데이터입니다.
@@ -281,7 +368,26 @@ export default function AdminPage() {
             </Tabs>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={toggleAllFilteredZones}
+              className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
+            >
+              {allFilteredSelected ? "전체 해제" : "전체 선택"}
+            </button>
+
+            <button
+              onClick={handleBulkVisitComplete}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow"
+            >
+              <CheckCircle2 size={16} />
+              선택 방문완료
+            </button>
+
+            <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
+              선택 {selectedZones.length}개
+            </div>
+
             <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
               총 {filteredZones.length}개
             </div>
@@ -302,52 +408,69 @@ export default function AdminPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredZones.map((zone) => (
-              <div
-                key={zone.firestoreId}
-                id={`zone-${zone.firestoreId}`}
-                className="flex items-center justify-between rounded-2xl bg-slate-50 p-4"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                      {zone.id}번
-                    </div>
+            {filteredZones.map((zone) => {
+              const checked = selectedZones.includes(zone.firestoreId);
 
-                    <div className="font-bold text-slate-900">
-                      {zone.name}
+              return (
+                <div
+                  key={zone.firestoreId}
+                  id={`zone-${zone.firestoreId}`}
+                  className={`flex items-center justify-between gap-3 rounded-2xl p-4 transition ${
+                    checked
+                      ? "bg-emerald-50 ring-2 ring-emerald-200"
+                      : "bg-slate-50"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-4">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleZone(zone.firestoreId)}
+                      className="h-5 w-5 shrink-0 accent-emerald-600"
+                    />
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="shrink-0 rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                          {zone.id}번
+                        </div>
+
+                        <div className="truncate font-bold text-slate-900">
+                          {zone.name}
+                        </div>
+                      </div>
+
+                      <div className="mt-1 text-sm text-slate-500">
+                        {zone.region}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-1 text-sm text-slate-500">
-                    {zone.region}
+                  <div className="flex shrink-0 gap-2">
+                    <Link
+                      href={`/admin/zones/${zone.firestoreId}`}
+                      scroll={false}
+                      onClick={() => {
+                        sessionStorage.setItem(
+                          "lastEditedZoneId",
+                          zone.firestoreId
+                        );
+                      }}
+                      className="rounded-xl bg-white px-3 py-2 text-sm shadow"
+                    >
+                      수정
+                    </Link>
+
+                    <button
+                      onClick={() => handleDeleteZone(zone)}
+                      className="rounded-xl bg-red-500 px-3 py-2 text-sm text-white shadow"
+                    >
+                      삭제
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex gap-2">
-                  <Link
-                    href={`/admin/zones/${zone.firestoreId}`}
-                    scroll={false}
-                    onClick={() => {
-                      sessionStorage.setItem(
-                        "lastEditedZoneId",
-                        zone.firestoreId
-                      );
-                    }}
-                    className="rounded-xl bg-white px-3 py-2 text-sm shadow"
-                  >
-                    수정
-                  </Link>
-
-                  <button
-                    onClick={() => handleDeleteZone(zone)}
-                    className="rounded-xl bg-red-500 px-3 py-2 text-sm text-white shadow"
-                  >
-                    삭제
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
