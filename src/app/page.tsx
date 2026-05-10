@@ -2,12 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Search, Shield, ClipboardList } from "lucide-react";
-import {
-  collection,
-  getDocs,
-  query,
-  orderBy,
-} from "firebase/firestore";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import Link from "next/link";
 
 import { db } from "@/firebase/firebase";
@@ -98,52 +93,56 @@ export default function Home() {
   });
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-4 flex items-center justify-between">
+    <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <Link
-  href="/visits"
-  className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 shadow"
->
-            <ClipboardList size={18} />
-            <span className="text-sm font-medium">방문기록</span>
+            href="/visits"
+            className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
+          >
+            <ClipboardList size={15} />
+            <span className="font-medium">방문기록</span>
           </Link>
 
-              <Link
-                href="/admin"
-                className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-white shadow"
-              >
-                <Shield size={18} />
-                <span className="text-sm font-medium">관리자</span>
-              </Link>
+          <Link
+            href="/admin"
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
+          >
+            <Shield size={15} />
+            <span className="font-medium">관리자</span>
+          </Link>
         </div>
 
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-slate-900">
+        <div className="mb-4">
+          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
             전자구역 카드
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
             영덕 전자구역 방문 관리 시스템
           </p>
         </div>
 
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+        <div className="relative mb-3">
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            size={16}
+          />
           <Input
             placeholder="구역 이름 또는 번호 검색"
-            className="bg-white pl-10"
+            className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
-        <Tabs defaultValue="전체" className="mb-6">
-          <TabsList className="flex w-full overflow-x-auto">
+        <Tabs defaultValue="전체" className="mb-4">
+          <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
             {regions.map((region) => (
               <TabsTrigger
                 key={region}
                 value={region}
                 onClick={() => setSelectedRegion(region)}
+                className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs"
               >
                 {region}
               </TabsTrigger>
@@ -151,37 +150,41 @@ export default function Home() {
           </TabsList>
         </Tabs>
 
-        <div className="mb-4 text-sm text-slate-500">
-          총 {filteredZones.length}개 구역
+        <div className="mb-3 text-xs text-slate-500 sm:text-sm">
+          총{" "}
+          <span className="font-semibold text-slate-800">
+            {filteredZones.length}
+          </span>
+          개 구역
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredZones.map((zone) => (
             <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
-              <Card className="cursor-pointer transition hover:shadow-lg">
-                <CardContent className="p-5">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                        {zone.id}.
-                      </div>
-
-                      <h3 className="text-lg font-bold text-slate-900">
-                        {zone.name}
-                      </h3>
+              <Card className="cursor-pointer rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <CardContent className="p-3 sm:p-3.5">
+                  <div className="flex items-start gap-2">
+                    <div className="mt-0.5 shrink-0 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs">
+                      {zone.id}.
                     </div>
 
-                    <p className="mt-1 text-sm text-gray-500">
-                      {zone.region}
-                    </p>
-                  </div>                  
+                    <div className="min-w-0">
+                      <h3 className="line-clamp-1 text-sm font-bold text-slate-900 sm:text-[15px]">
+                        {zone.name}
+                      </h3>
 
-                  <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm">
-                    <div className="text-xs text-slate-400">
+                      <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                        {zone.region}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-lg bg-slate-50 px-2.5 py-2">
+                    <div className="text-[10px] text-slate-400 sm:text-[11px]">
                       최근 방문
                     </div>
 
-                    <div className="mt-1 font-medium text-slate-700">
+                    <div className="mt-0.5 line-clamp-1 text-[11px] font-medium text-slate-700 sm:text-xs">
                       {zone.lastVisitedAt?.seconds
                         ? new Date(
                             zone.lastVisitedAt.seconds * 1000

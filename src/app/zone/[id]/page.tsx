@@ -1,133 +1,156 @@
 "use client";
 
+import Image from "next/image";
+
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+
+import Link from "next/link";
+
+import { useParams } from "next/navigation";
+
 import {
   doc,
   getDoc,
-  collection,
   addDoc,
-  serverTimestamp,
-  getDocs,
+  collection,
   query,
   where,
   orderBy,
+  limit,
+  getDocs,
+  serverTimestamp,
 } from "firebase/firestore";
-import { ArrowLeft, MapPin, Hash, ClipboardList } from "lucide-react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { db, auth } from "@/firebase/firebase";
 
+import {
+  ArrowLeft,
+  MapPin,
+  Clock,
+  CheckCircle2,
+} from "lucide-react";
+
+import { db } from "@/firebase/firebase";
 
 interface Zone {
-  firestoreId: string;
   id?: number;
   name: string;
   region: string;
-  lastVisitedAt?: any;
+  imageUrl?: string;
 }
+
 interface VisitLog {
   id: string;
+  zoneId: string;
   zoneName: string;
-  region: string;
-  createdAt?: any;
+  zoneNumber?: number;
+  createdAt?: {
+    seconds: number;
+  };
 }
 
 export default function ZoneDetailPage() {
   const params = useParams();
-  const router = useRouter();
 
   const id = params.id as string;
 
   const [zone, setZone] = useState<Zone | null>(null);
-  const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
+
   const [loading, setLoading] = useState(true);
 
+  const [isImageOpen, setIsImageOpen] = useState(false);
+
+  const [recentVisit, setRecentVisit] =
+    useState<VisitLog | null>(null);
+
   useEffect(() => {
-    async function handleVisitLog() {
-  if (!zone) return;
-
-  try {
-      await addDoc(collection(db, "visitLogs"), {
-        zoneId: id,
-        zoneNumber: zone.id,
-        zoneName: zone.name,
-        region: zone.region,
-        createdAt: serverTimestamp(),
-      });
-
-    alert("방문 기록이 저장되었습니다!");
-  } catch (error) {
-    console.error("방문 기록 저장 에러:", error);
-
-    alert("저장 실패");
-  }
-}
     async function fetchZone() {
       try {
         const docRef = doc(db, "zones", id);
+
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          setZone(docSnap.data() as Zone);
-        } else {
-          setZone(null);
+          const data = docSnap.data() as Zone;
+
+          setZone(data);
         }
       } catch (error) {
-        console.error("상세페이지 Firebase 에러:", error);
+        console.error("구역 조회 에러:", error);
       } finally {
         setLoading(false);
       }
     }
 
+    async function fetchRecentVisit() {
+      try {
+        const q = query(
+          collection(db, "visitLogs"),
+          where("zoneId", "==", id),
+          orderBy("createdAt", "desc"),
+          limit(1)
+        );
+
+        const querySnapshot = await getDocs(q);
+
+        const visits = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as VisitLog[];
+
+        if (visits.length > 0) {
+          setRecentVisit(visits[0]);
+        }
+      } catch (error) {
+        console.error("방문 기록 조회 에러:", error);
+      }
+    }
+
     if (id) {
       fetchZone();
-      fetchVisitLogs();
-}
+      fetchRecentVisit();
+    }
   }, [id]);
-async function handleVisitLog() {
-  if (!zone) return;
 
-  try {
-    await addDoc(collection(db, "visitLogs"), {
-      zoneId: id,
-      zoneNumber: zone.id,
-      zoneName: zone.name,
-      region: zone.region,
-      createdAt: serverTimestamp(),
-    });
+  async function handleVisitLog() {
+    if (!zone) return;
 
-    await fetchVisitLogs();
-    alert("방문 기록이 저장되었습니다!");
-  } catch (error) {
-    console.error("방문 기록 저장 에러:", error);
-    alert("저장 실패");
+    try {
+      await addDoc(collection(db, "visitLogs"), {
+        zoneId: id,
+        zoneName: zone.name,
+        zoneNumber: zone.id,
+        createdAt: serverTimestamp(),
+      });
+
+      alert("구역 완료 처리되었습니다!");
+
+      const q = query(
+        collection(db, "visitLogs"),
+        where("zoneId", "==", id),
+        orderBy("createdAt", "desc"),
+        limit(1)
+      );
+
+      const querySnapshot = await getDocs(q);
+
+      const visits = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as VisitLog[];
+
+      if (visits.length > 0) {
+        setRecentVisit(visits[0]);
+      }
+    } catch (error) {
+      console.error("방문 기록 저장 에러:", error);
+
+      alert("저장 실패");
+    }
   }
-}
-
-async function fetchVisitLogs() {
-  try {
-    const q = query(
-  collection(db, "visitLogs"),
-  where("zoneId", "==", id)
-);
-
-    const querySnapshot = await getDocs(q);
-
-    const logs = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as VisitLog[];
-
-    setVisitLogs(logs);
-  } catch (error) {
-    console.error("방문 기록 조회 에러:", error);
-  }
-}
 
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-100 p-6">
-        <div className="mx-auto max-w-3xl rounded-2xl bg-white p-8 shadow">
+        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow">
           불러오는 중...
         </div>
       </main>
@@ -137,17 +160,8 @@ async function fetchVisitLogs() {
   if (!zone) {
     return (
       <main className="min-h-screen bg-slate-100 p-6">
-        <div className="mx-auto max-w-3xl rounded-2xl bg-white p-8 shadow">
-          <h1 className="text-2xl font-bold">
-            구역 정보를 찾을 수 없습니다.
-          </h1>
-
-          <button
-            onClick={() => router.back()}
-            className="mt-6 rounded-xl bg-slate-900 px-4 py-2 text-white"
-          >
-            뒤로가기
-          </button>
+        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow">
+          구역 정보를 찾을 수 없습니다.
         </div>
       </main>
     );
@@ -156,111 +170,117 @@ async function fetchVisitLogs() {
   return (
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-3xl">
-        <button
-          onClick={() => router.back()}
-          className="mb-4 flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
+
+        <Link
+          href="/"
+          className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
         >
           <ArrowLeft size={18} />
-          목록으로 돌아가기
-        </button>
+          메인으로 돌아가기
+        </Link>
 
-        <section className="overflow-hidden rounded-3xl bg-white shadow">
-          <div className="bg-slate-900 p-6 text-white">
+        <section className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow">
+
+          <div className="p-6">
+
             <p className="text-sm text-slate-300">
-              전자구역 상세정보
+              {zone.region}
             </p>
 
-            <h1 className="mt-3 text-4xl font-bold">
-              {zone.name}
+            <h1 className="mt-2 text-4xl font-bold">
+              {zone.id}번 {zone.name}
             </h1>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              <div className="flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 text-sm">
-                <MapPin size={15} />
-                {zone.region}
+            {zone.imageUrl && (
+              <div
+                onClick={() => setIsImageOpen(true)}
+                className="mt-6 cursor-pointer overflow-hidden rounded-3xl bg-white shadow"
+              >
+                <Image
+                  src={zone.imageUrl}
+                  alt={zone.name}
+                  width={1200}
+                  height={800}
+                  className="h-auto w-full max-h-[420px] object-contain"
+                />
+
+                <p className="py-2 text-center text-xs text-slate-400">
+                  이미지를 누르면 크게 볼 수 있습니다
+                </p>
               </div>
+            )}
 
-              <div className="flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 text-sm">
-                <Hash size={15} />
-                구역번호 {zone.id}
-              </div>
+            <div className="mt-6 flex items-center gap-2 text-slate-300">
+              <MapPin size={18} />
+              <span>{zone.region}</span>
             </div>
-          </div>
 
-          <div className="space-y-4 p-6">
-            <div className="rounded-2xl bg-slate-50 p-5">
-              <div className="mb-2 flex items-center gap-2 font-semibold">
-                <ClipboardList size={18} />
-                방문 관리
-              </div>
+            <button
+              onClick={handleVisitLog}
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
+            >
+              <CheckCircle2 size={20} />
+              구역완료
+            </button>
 
-              <p className="text-sm text-slate-500">
-                이 구역의 방문 기록과 세부 정보를 관리할 수 있습니다.
-              </p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-5">
-  <h2 className="mb-4 text-lg font-bold">
-    최근 방문 기록
-  </h2>
-
-  <div className="space-y-3">
-    {visitLogs.length === 0 ? (
-      <p className="text-sm text-slate-400">
-        방문 기록이 없습니다.
-      </p>
-    ) : (
-      visitLogs.slice(0, 1).map((log) => (
-        <div
-  key={log.id}
-  className="rounded-xl bg-white p-4 shadow-sm"
->
-  <div className="mb-2 text-xs text-slate-400">
-    {log.createdAt?.seconds
-      ? new Date(
-          log.createdAt.seconds * 1000
-        ).toLocaleString()
-      : "시간 없음"}
-  </div>
-
-  <div className="font-medium">
-    {log.zoneName}
-  </div>
-
-  <div className="text-sm text-slate-500">
-    {log.region}
-  </div>
-</div>
-      ))
-    )}
-  </div>
-</div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-  onClick={handleVisitLog}
-  className="rounded-2xl bg-slate-900 p-4 text-left text-white shadow"
->
-                <div className="text-sm text-slate-300">
-                  다음 작업
-                </div>
-                <div className="mt-1 text-lg font-bold">
-                  구역 완료
-                </div>
-              </button>
-
-              <button className="rounded-2xl bg-white p-4 text-left shadow ring-1 ring-slate-200">
-                <div className="text-sm text-slate-400">
-                  관리
-                </div>
-                <div className="mt-1 text-lg font-bold">
-                  구역 정보 수정
-                </div>
-              </button>
-            </div>
-            
           </div>
         </section>
+
+        <section className="mt-6 rounded-3xl bg-white p-6 shadow">
+
+          <div className="flex items-center gap-2">
+            <Clock size={18} />
+            <h2 className="text-lg font-bold">
+              최근 방문 기록
+            </h2>
+          </div>
+
+          {recentVisit ? (
+            <div className="mt-4 rounded-2xl bg-slate-100 p-4">
+              <p className="font-semibold">
+                {recentVisit.zoneNumber}번 {recentVisit.zoneName}
+              </p>
+
+              <p className="mt-1 text-sm text-slate-500">
+                {recentVisit.createdAt?.seconds
+                  ? new Date(
+                      recentVisit.createdAt.seconds * 1000
+                    ).toLocaleString()
+                  : "시간 정보 없음"}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">
+              아직 방문 기록이 없습니다.
+            </p>
+          )}
+
+        </section>
+
       </div>
+
+      {isImageOpen && zone.imageUrl && (
+        <div
+          onClick={() => setIsImageOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        >
+          <button
+            onClick={() => setIsImageOpen(false)}
+            className="absolute right-4 top-4 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-900"
+          >
+            닫기
+          </button>
+
+          <Image
+            src={zone.imageUrl}
+            alt={zone.name}
+            width={1600}
+            height={1200}
+            onClick={(e) => e.stopPropagation()}
+            className="h-auto max-h-[90vh] w-auto max-w-full rounded-2xl bg-white object-contain"
+          />
+        </div>
+      )}
     </main>
   );
 }

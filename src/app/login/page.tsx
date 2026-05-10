@@ -15,14 +15,16 @@ export default function LoginPage() {
 
   async function handleLogin() {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const loginEmail = `${email}@hupo.local`;
+
+      await signInWithEmailAndPassword(auth, loginEmail, password);
 
       alert("로그인되었습니다.");
 
       router.push("/admin");
     } catch (error) {
       console.error("로그인 에러:", error);
-      alert("로그인 실패. 이메일과 비밀번호를 확인해주세요.");
+      alert("로그인 실패. 아이디과 비밀번호를 확인해주세요.");
     }
   }
 
@@ -42,7 +44,7 @@ export default function LoginPage() {
         <div className="mt-8 space-y-4">
           <input
             type="email"
-            placeholder="이메일"
+            placeholder="아이디"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none"
