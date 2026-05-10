@@ -42,6 +42,8 @@ interface VisitLog {
   zoneId: string;
   zoneName: string;
   zoneNumber?: number;
+  visitorName?: string;
+  region?: string;
   createdAt?: {
     seconds: number;
   };
@@ -110,15 +112,24 @@ export default function ZoneDetailPage() {
   async function handleVisitLog() {
     if (!zone) return;
 
+    const visitorName = prompt("방문자 이름을 입력해주세요.");
+
+    if (!visitorName || visitorName.trim() === "") {
+      alert("이름을 입력해야 방문완료 처리할 수 있습니다.");
+      return;
+    }
+
     try {
       await addDoc(collection(db, "visitLogs"), {
         zoneId: id,
         zoneName: zone.name,
         zoneNumber: zone.id,
+        region: zone.region,
+        visitorName: visitorName.trim(),
         createdAt: serverTimestamp(),
       });
 
-      alert("구역 완료 처리되었습니다!");
+      alert(`${visitorName.trim()}님 방문완료 처리되었습니다!`);
 
       const q = query(
         collection(db, "visitLogs"),
@@ -222,6 +233,12 @@ export default function ZoneDetailPage() {
               <p className="font-semibold">
                 {recentVisit.zoneNumber}번 {recentVisit.zoneName}
               </p>
+
+              {recentVisit.visitorName && (
+                <p className="mt-1 text-sm font-medium text-slate-700">
+                  방문자: {recentVisit.visitorName}
+                </p>
+              )}
 
               <p className="mt-1 text-sm text-slate-500">
                 {recentVisit.createdAt?.seconds

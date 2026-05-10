@@ -12,6 +12,8 @@ import {
   addDoc,
   serverTimestamp,
   getDoc,
+  query,
+  orderBy,
 } from "firebase/firestore";
 
 import {
@@ -45,17 +47,30 @@ interface Zone {
   id?: number;
   name: string;
   region: string;
+  lastVisitedAt?: any;
+  lastVisitorName?: string;
+}
+
+interface VisitLog {
+  id: string;
+  zoneId?: string;
+  zoneName?: string;
+  zoneNumber?: number;
+  visitorName?: string;
+  createdAt?: any;
 }
 
 export default function AdminPage() {
   const router = useRouter();
 
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [role, setRole] = useState<"admin" | "leader" | null>(null);
+
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
-  const [role, setRole] = useState<"admin" | "leader" | null>(null);
+  const [bulkCompleting, setBulkCompleting] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -107,9 +122,48 @@ export default function AdminPage() {
           ...doc.data(),
         })) as Zone[];
 
-        zoneData.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+        const visitQuery = query(
+          collection(db, "visitLogs"),
+          orderBy("createdAt", "desc")
+        );
 
-        setZones(zoneData);
+        const visitSnapshot = await getDocs(visitQuery);
+
+        const latestVisitMap = new Map<
+          string,
+          {
+            createdAt?: any;
+            visitorName?: string;
+          }
+        >();
+
+        visitSnapshot.docs.forEach((doc) => {
+          const log = {
+            id: doc.id,
+            ...doc.data(),
+          } as VisitLog;
+
+          if (log.zoneId && !latestVisitMap.has(log.zoneId)) {
+            latestVisitMap.set(log.zoneId, {
+              createdAt: log.createdAt,
+              visitorName: log.visitorName,
+            });
+          }
+        });
+
+        const zoneDataWithVisit = zoneData.map((zone) => {
+          const latestVisit = latestVisitMap.get(zone.firestoreId);
+
+          return {
+            ...zone,
+            lastVisitedAt: latestVisit?.createdAt,
+            lastVisitorName: latestVisit?.visitorName,
+          };
+        });
+
+        zoneDataWithVisit.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+
+        setZones(zoneDataWithVisit);
       } catch (error) {
         console.error("관리자 구역 조회 에러:", error);
       } finally {
@@ -159,6 +213,18 @@ export default function AdminPage() {
     filteredZones.length > 0 &&
     filteredZones.every((zone) => selectedZones.includes(zone.firestoreId));
 
+  function formatDate(createdAt: any) {
+    if (!createdAt?.seconds) return "방문 기록 없음";
+
+    return new Date(createdAt.seconds * 1000).toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
   function toggleZone(zoneId: string) {
     setSelectedZones((prev) =>
       prev.includes(zoneId)
@@ -198,6 +264,8 @@ export default function AdminPage() {
     if (!ok) return;
 
     try {
+      setBulkCompleting(true);
+
       const targetZones = zones.filter((zone) =>
         selectedZones.includes(zone.firestoreId)
       );
@@ -208,8 +276,26 @@ export default function AdminPage() {
             zoneId: zone.firestoreId,
             zoneName: zone.name,
             zoneNumber: zone.id,
+            region: zone.region,
+            visitorName: "관리자",
             createdAt: serverTimestamp(),
           })
+        )
+      );
+
+      const nowPlaceholder = {
+        seconds: Math.floor(Date.now() / 1000),
+      };
+
+      setZones((prev) =>
+        prev.map((zone) =>
+          selectedZones.includes(zone.firestoreId)
+            ? {
+                ...zone,
+                lastVisitedAt: nowPlaceholder,
+                lastVisitorName: "관리자",
+              }
+            : zone
         )
       );
 
@@ -219,6 +305,8 @@ export default function AdminPage() {
     } catch (error) {
       console.error("다중 방문완료 에러:", error);
       alert("처리 실패");
+    } finally {
+      setBulkCompleting(false);
     }
   }
 
@@ -343,7 +431,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <section className="mt-6 rounded-3xl bg-white p-5 shadow">
+      <section className="mt-6 rounded-3xl bg-white p-4 shadow sm:p-5">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h2 className="text-xl font-bold">구역 목록</h2>
@@ -353,13 +441,13 @@ export default function AdminPage() {
             </p>
 
             <Tabs defaultValue="전체" className="mt-4">
-              <TabsList className="flex h-14 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
+              <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
                 {regions.map((region) => (
                   <TabsTrigger
                     key={region}
                     value={region}
                     onClick={() => setSelectedRegion(region)}
-                    className="rounded-xl px-5 text-base font-semibold"
+                    className="rounded-xl px-4 text-sm font-semibold"
                   >
                     {region}
                   </TabsTrigger>
@@ -378,10 +466,11 @@ export default function AdminPage() {
 
             <button
               onClick={handleBulkVisitComplete}
-              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow"
+              disabled={bulkCompleting}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
             >
               <CheckCircle2 size={16} />
-              선택 방문완료
+              {bulkCompleting ? "처리 중..." : "선택 방문완료"}
             </button>
 
             <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
@@ -407,7 +496,7 @@ export default function AdminPage() {
             불러오는 중...
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filteredZones.map((zone) => {
               const checked = selectedZones.includes(zone.firestoreId);
 
@@ -415,38 +504,49 @@ export default function AdminPage() {
                 <div
                   key={zone.firestoreId}
                   id={`zone-${zone.firestoreId}`}
-                  className={`flex items-center justify-between gap-3 rounded-2xl p-4 transition ${
+                  className={`flex items-center justify-between gap-2 rounded-2xl px-3 py-2.5 transition sm:gap-3 sm:px-4 ${
                     checked
                       ? "bg-emerald-50 ring-2 ring-emerald-200"
                       : "bg-slate-50"
                   }`}
                 >
-                  <div className="flex min-w-0 items-center gap-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleZone(zone.firestoreId)}
-                      className="h-5 w-5 shrink-0 accent-emerald-600"
+                      className="h-4 w-4 shrink-0 accent-emerald-600"
                     />
 
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="shrink-0 rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <div className="shrink-0 rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white">
                           {zone.id}번
                         </div>
 
-                        <div className="truncate font-bold text-slate-900">
+                        <div className="max-w-full truncate text-sm font-bold text-slate-900 sm:text-base">
                           {zone.name}
                         </div>
+
+                        {zone.lastVisitedAt?.seconds ? (
+                          <div className="text-[11px] text-slate-500 sm:text-xs">
+                            최근: {zone.lastVisitorName || "이름 없음"} /{" "}
+                            {formatDate(zone.lastVisitedAt)}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400 sm:text-xs">
+                            최근 방문기록 없음
+                          </div>
+                        )}
                       </div>
 
-                      <div className="mt-1 text-sm text-slate-500">
+                      <div className="mt-0.5 text-xs text-slate-500">
                         {zone.region}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 gap-1.5">
                     <Link
                       href={`/admin/zones/${zone.firestoreId}`}
                       scroll={false}
@@ -456,14 +556,14 @@ export default function AdminPage() {
                           zone.firestoreId
                         );
                       }}
-                      className="rounded-xl bg-white px-3 py-2 text-sm shadow"
+                      className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium shadow sm:px-3 sm:py-2 sm:text-sm"
                     >
                       수정
                     </Link>
 
                     <button
                       onClick={() => handleDeleteZone(zone)}
-                      className="rounded-xl bg-red-500 px-3 py-2 text-sm text-white shadow"
+                      className="rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow sm:px-3 sm:py-2 sm:text-sm"
                     >
                       삭제
                     </button>
