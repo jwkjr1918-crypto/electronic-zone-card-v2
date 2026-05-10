@@ -56,10 +56,7 @@ export default function ZoneDetailPage() {
 
   const [loading, setLoading] = useState(true);
 
-  const [isImageOpen, setIsImageOpen] = useState(false);
-
-  const [recentVisit, setRecentVisit] =
-    useState<VisitLog | null>(null);
+  const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
 
   useEffect(() => {
     async function fetchZone() {
@@ -170,7 +167,6 @@ export default function ZoneDetailPage() {
   return (
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-3xl">
-
         <Link
           href="/"
           className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
@@ -179,34 +175,24 @@ export default function ZoneDetailPage() {
           메인으로 돌아가기
         </Link>
 
-        <section className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow">
-
+        <section className="rounded-3xl bg-slate-900 text-white shadow">
           <div className="p-6">
-
-            <p className="text-sm text-slate-300">
-              {zone.region}
-            </p>
+            <p className="text-sm text-slate-300">{zone.region}</p>
 
             <h1 className="mt-2 text-4xl font-bold">
               {zone.id}번 {zone.name}
             </h1>
 
             {zone.imageUrl && (
-              <div
-                onClick={() => setIsImageOpen(true)}
-                className="mt-6 cursor-pointer overflow-hidden rounded-3xl bg-white shadow"
-              >
+              <div className="mt-6">
                 <Image
                   src={zone.imageUrl}
                   alt={zone.name}
                   width={1200}
                   height={800}
-                  className="h-auto w-full max-h-[420px] object-contain"
+                  className="pointer-events-none h-auto max-h-[520px] w-full object-contain select-none"
+                  priority
                 />
-
-                <p className="py-2 text-center text-xs text-slate-400">
-                  이미지를 누르면 크게 볼 수 있습니다
-                </p>
               </div>
             )}
 
@@ -222,17 +208,13 @@ export default function ZoneDetailPage() {
               <CheckCircle2 size={20} />
               구역완료
             </button>
-
           </div>
         </section>
 
         <section className="mt-6 rounded-3xl bg-white p-6 shadow">
-
           <div className="flex items-center gap-2">
             <Clock size={18} />
-            <h2 className="text-lg font-bold">
-              최근 방문 기록
-            </h2>
+            <h2 className="text-lg font-bold">최근 방문 기록</h2>
           </div>
 
           {recentVisit ? (
@@ -254,33 +236,8 @@ export default function ZoneDetailPage() {
               아직 방문 기록이 없습니다.
             </p>
           )}
-
         </section>
-
       </div>
-
-      {isImageOpen && zone.imageUrl && (
-        <div
-          onClick={() => setIsImageOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-        >
-          <button
-            onClick={() => setIsImageOpen(false)}
-            className="absolute right-4 top-4 rounded-full bg-white px-4 py-2 text-sm font-bold text-slate-900"
-          >
-            닫기
-          </button>
-
-          <Image
-            src={zone.imageUrl}
-            alt={zone.name}
-            width={1600}
-            height={1200}
-            onClick={(e) => e.stopPropagation()}
-            className="h-auto max-h-[90vh] w-auto max-w-full rounded-2xl bg-white object-contain"
-          />
-        </div>
-      )}
     </main>
   );
 }
