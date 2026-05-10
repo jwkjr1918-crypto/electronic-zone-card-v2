@@ -51,7 +51,7 @@ const regions = [
 
 const compressImage = (file: File): Promise<File> => {
   return new Promise((resolve, reject) => {
-    const img = new Image();
+    const img = new window.Image();
     const reader = new FileReader();
 
     reader.onload = (e) => {
