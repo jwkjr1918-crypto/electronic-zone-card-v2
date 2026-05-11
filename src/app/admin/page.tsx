@@ -153,7 +153,10 @@ export default function AdminPage() {
             </p>
           </Link>
 
-          <div className="rounded-2xl bg-white p-5 shadow">
+          <Link
+            href="/admin/settings"
+            className="rounded-2xl bg-white p-5 shadow transition hover:-translate-y-1 hover:shadow-lg"
+          >
             <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100">
               <Settings size={22} />
             </div>
@@ -161,9 +164,9 @@ export default function AdminPage() {
             <h2 className="text-lg font-bold">설정</h2>
 
             <p className="mt-2 text-sm text-slate-500">
-              관리자 기능을 단계적으로 추가할 예정입니다.
+              방문완료 기본 이름 등 관리자 설정을 관리합니다.
             </p>
-          </div>
+          </Link>
         </div>
       </div>
     </main>
