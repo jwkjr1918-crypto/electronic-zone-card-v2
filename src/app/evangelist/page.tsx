@@ -19,7 +19,8 @@ export default function EvangelistPage() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [zoneNumber, setZoneNumber] = useState(() => {
+  const [zoneNumber, setZoneNumber] = useState("");
+  const [lastNumber] = useState(() => {
     if (typeof window === "undefined") return "";
     return localStorage.getItem("lastEvangelistZoneNumber") || "";
   });
@@ -149,6 +150,13 @@ export default function EvangelistPage() {
             </div>
           </div>
 
+          {lastNumber && (
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              이전 입력 번호:{" "}
+              <span className="font-bold text-slate-900">{lastNumber}번</span>
+            </div>
+          )}
+
           {recentNumbers.length > 0 && (
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-600">
@@ -170,13 +178,6 @@ export default function EvangelistPage() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          {zoneNumber && (
-            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-              현재 입력 번호:{" "}
-              <span className="font-bold text-slate-900">{zoneNumber}</span>
             </div>
           )}
 
