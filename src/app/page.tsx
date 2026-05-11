@@ -7,6 +7,7 @@ import {
   ClipboardList,
   CheckCircle2,
   AlertCircle,
+  Eye,
 } from "lucide-react";
 
 import {
@@ -15,6 +16,7 @@ import {
   query,
   orderBy,
   Timestamp,
+  onSnapshot,
 } from "firebase/firestore";
 
 import Link from "next/link";
@@ -54,8 +56,14 @@ interface VisitLogData {
   createdAt?: Timestamp | null;
 }
 
+interface ActiveZoneView {
+  zoneId?: string;
+  expiresAt?: number;
+}
+
 export default function Home() {
   const [zones, setZones] = useState<Zone[]>([]);
+  const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [sortType, setSortType] = useState<SortType>("todo");
@@ -115,6 +123,38 @@ export default function Home() {
     }
 
     fetchZones();
+  }, []);
+
+  useEffect(() => {
+    let latestViews: ActiveZoneView[] = [];
+
+    function updateActiveZones(views: ActiveZoneView[]) {
+      const now = Date.now();
+
+      const ids = Array.from(
+        new Set(
+          views
+            .filter((view) => view.zoneId && view.expiresAt && view.expiresAt > now)
+            .map((view) => String(view.zoneId))
+        )
+      );
+
+      setActiveZoneIds(ids);
+    }
+
+    const unsubscribe = onSnapshot(collection(db, "activeZoneViews"), (snapshot) => {
+      latestViews = snapshot.docs.map((viewDoc) => viewDoc.data() as ActiveZoneView);
+      updateActiveZones(latestViews);
+    });
+
+    const interval = window.setInterval(() => {
+      updateActiveZones(latestViews);
+    }, 15000);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(interval);
+    };
   }, []);
 
   const filteredZones = useMemo(() => {
@@ -231,66 +271,88 @@ export default function Home() {
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredZones.map((zone) => {
             const isVisited = Boolean(zone.lastVisitedAt?.seconds);
+            const isActive = activeZoneIds.includes(zone.firestoreId);
 
             return (
               <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
                 <Card
                   className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-                    isVisited
-                      ? "border-slate-200 bg-slate-50 opacity-85"
-                      : "border-slate-200 bg-white"
+                    isActive
+                      ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
+                      : isVisited
+                        ? "border-slate-200 bg-slate-50 opacity-85"
+                        : "border-slate-200 bg-white"
                   }`}
                 >
                   <CardContent className="p-3 sm:p-3.5">
-                   <div className="mb-2">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <div
-                        className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
-                          isVisited ? "bg-slate-500" : "bg-slate-900"
-                        }`}
-                      >
-                        {zone.id}.
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <h3
-                          className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
-                            isVisited ? "text-slate-700" : "text-slate-900"
+                    <div className="mb-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <div
+                          className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
+                            isActive
+                              ? "bg-emerald-600"
+                              : isVisited
+                                ? "bg-slate-500"
+                                : "bg-slate-900"
                           }`}
                         >
-                          {zone.name}
-                        </h3>
+                          {zone.id}.
+                        </div>
 
-                        <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
-                          {zone.region}
-                        </p>
+                        <div className="min-w-0 flex-1">
+                          <h3
+                            className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                              isActive
+                                ? "text-emerald-950"
+                                : isVisited
+                                  ? "text-slate-700"
+                                  : "text-slate-900"
+                            }`}
+                          >
+                            {zone.name}
+                          </h3>
+
+                          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                            {zone.region}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                          isActive
+                            ? "bg-emerald-600 text-white"
+                            : isVisited
+                              ? "bg-slate-200 text-slate-600"
+                              : "bg-blue-50 text-blue-700"
+                        }`}
+                      >
+                        {isActive ? (
+                          <>
+                            <Eye size={11} />
+                            방문중
+                          </>
+                        ) : isVisited ? (
+                          <>
+                            <CheckCircle2 size={11} />
+                            완료
+                          </>
+                        ) : (
+                          <>
+                            <AlertCircle size={11} />
+                            방문 필요
+                          </>
+                        )}
                       </div>
                     </div>
-
-                    <div
-                      className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
-                        isVisited
-                          ? "bg-slate-200 text-slate-600"
-                          : "bg-blue-50 text-blue-700"
-                      }`}
-                    >
-                      {isVisited ? (
-                        <>
-                          <CheckCircle2 size={11} />
-                          완료
-                        </>
-                      ) : (
-                        <>
-                          <AlertCircle size={11} />
-                          방문 필요
-                        </>
-                      )}
-                    </div>
-                  </div> 
 
                     <div
                       className={`mt-3 rounded-lg px-2.5 py-2 ${
-                        isVisited ? "bg-slate-100" : "bg-slate-50"
+                        isActive
+                          ? "bg-white/80"
+                          : isVisited
+                            ? "bg-slate-100"
+                            : "bg-slate-50"
                       }`}
                     >
                       <div className="text-[10px] text-slate-400 sm:text-[11px]">
@@ -299,7 +361,11 @@ export default function Home() {
 
                       <div
                         className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
-                          isVisited ? "text-slate-700" : "text-slate-600"
+                          isActive
+                            ? "text-emerald-800"
+                            : isVisited
+                              ? "text-slate-700"
+                              : "text-slate-600"
                         }`}
                       >
                         {zone.lastVisitedAt?.seconds

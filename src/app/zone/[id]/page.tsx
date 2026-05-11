@@ -1,13 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  useParams,
-  useRouter,
-  useSearchParams,
-} from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+
+import { onAuthStateChanged } from "firebase/auth";
 
 import {
   doc,
@@ -20,6 +18,8 @@ import {
   limit,
   getDocs,
   serverTimestamp,
+  setDoc,
+  deleteDoc,
 } from "firebase/firestore";
 
 import {
@@ -31,7 +31,7 @@ import {
   RotateCw,
 } from "lucide-react";
 
-import { db } from "@/firebase/firebase";
+import { db, auth } from "@/firebase/firebase";
 
 interface Zone {
   id?: number;
@@ -52,6 +52,27 @@ interface VisitLog {
   };
 }
 
+const ACTIVE_VIEW_EXPIRE_MS = 120000;
+const ACTIVE_VIEW_HEARTBEAT_MS = 30000;
+
+function getSessionViewId(zoneId: string) {
+  const key = "activeZoneViewSessionId";
+  const existing = sessionStorage.getItem(key);
+
+  if (existing) {
+    return `${zoneId}_${existing}`;
+  }
+
+  const next =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  sessionStorage.setItem(key, next);
+
+  return `${zoneId}_${next}`;
+}
+
 export default function ZoneDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -64,9 +85,14 @@ export default function ZoneDetailPage() {
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
 
-  const fromEvangelist =
-    searchParams.get("from") === "evangelist" ||
-    sessionStorage.getItem("zoneEntryFrom") === "evangelist";
+  const fromEvangelist = useMemo(() => {
+    if (typeof window === "undefined") return false;
+
+    return (
+      searchParams.get("from") === "evangelist" ||
+      sessionStorage.getItem("zoneEntryFrom") === "evangelist"
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     async function fetchZone() {
@@ -95,9 +121,9 @@ export default function ZoneDetailPage() {
 
         const querySnapshot = await getDocs(q);
 
-        const visits = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
+        const visits = querySnapshot.docs.map((visitDoc) => ({
+          id: visitDoc.id,
+          ...visitDoc.data(),
         })) as VisitLog[];
 
         if (visits.length > 0) {
@@ -112,6 +138,97 @@ export default function ZoneDetailPage() {
       fetchZone();
       fetchRecentVisit();
     }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    let intervalId: number | null = null;
+    let activeViewDocId: string | null = null;
+    let activeViewRef: ReturnType<typeof doc> | null = null;
+    let cleaned = false;
+
+    async function writeActiveView() {
+      if (!activeViewRef) return;
+
+      await setDoc(
+        activeViewRef,
+        {
+          zoneId: id,
+          enteredAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          expiresAt: Date.now() + ACTIVE_VIEW_EXPIRE_MS,
+        },
+        { merge: true }
+      );
+    }
+
+    async function cleanupActiveView() {
+      if (cleaned || !activeViewRef) return;
+
+      cleaned = true;
+
+      try {
+        await deleteDoc(activeViewRef);
+      } catch (error) {
+        console.error("방문중 상태 삭제 에러:", error);
+      }
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (user) {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          const userRole = userSnap.exists() ? userSnap.data().role : null;
+
+          if (userRole === "admin") {
+            return;
+          }
+        }
+
+        activeViewDocId = getSessionViewId(id);
+        activeViewRef = doc(db, "activeZoneViews", activeViewDocId);
+
+        await writeActiveView();
+
+        intervalId = window.setInterval(() => {
+          writeActiveView().catch((error) => {
+            console.error("방문중 상태 갱신 에러:", error);
+          });
+        }, ACTIVE_VIEW_HEARTBEAT_MS);
+      } catch (error) {
+        console.error("방문중 상태 등록 에러:", error);
+      }
+    });
+
+    const handleBeforeUnload = () => {
+      if (!activeViewDocId) return;
+
+      const url = `https://firestore.googleapis.com/v1/projects/${
+        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+      }/databases/(default)/documents/activeZoneViews/${activeViewDocId}`;
+
+      try {
+        navigator.sendBeacon?.(url);
+      } catch {
+        // sendBeacon은 보조 수단입니다. 실제 정리는 expiresAt으로 처리됩니다.
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      unsubscribe();
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+
+      cleanupActiveView();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -169,9 +286,9 @@ export default function ZoneDetailPage() {
 
       const querySnapshot = await getDocs(q);
 
-      const visits = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
+      const visits = querySnapshot.docs.map((visitDoc) => ({
+        id: visitDoc.id,
+        ...visitDoc.data(),
       })) as VisitLog[];
 
       if (visits.length > 0) {
@@ -180,7 +297,6 @@ export default function ZoneDetailPage() {
 
       if (fromEvangelist) {
         sessionStorage.removeItem("zoneEntryFrom");
-
         router.push("/evangelist");
       }
     } catch (error) {
