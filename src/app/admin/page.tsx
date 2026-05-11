@@ -14,6 +14,7 @@ import {
   getDoc,
   query,
   orderBy,
+  writeBatch,
 } from "firebase/firestore";
 
 import {
@@ -23,6 +24,7 @@ import {
   ClipboardList,
   ShieldCheck,
   CheckCircle2,
+  Trash2,
 } from "lucide-react";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -71,6 +73,7 @@ export default function AdminPage() {
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
   const [bulkCompleting, setBulkCompleting] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -310,6 +313,44 @@ export default function AdminPage() {
     }
   }
 
+  async function handleBulkDeleteZones() {
+    if (selectedZones.length === 0) {
+      alert("선택된 구역이 없습니다.");
+      return;
+    }
+
+    const ok = confirm(
+      `선택한 ${selectedZones.length}개 구역을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`
+    );
+
+    if (!ok) return;
+
+    try {
+      setBulkDeleting(true);
+
+      const batch = writeBatch(db);
+
+      selectedZones.forEach((zoneId) => {
+        batch.delete(doc(db, "zones", zoneId));
+      });
+
+      await batch.commit();
+
+      setZones((prev) =>
+        prev.filter((zone) => !selectedZones.includes(zone.firestoreId))
+      );
+
+      setSelectedZones([]);
+
+      alert("선택한 구역이 삭제되었습니다.");
+    } catch (error) {
+      console.error("선택 구역 삭제 에러:", error);
+      alert("선택 삭제 실패");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   async function handleDeleteZone(zone: Zone) {
     const ok = confirm(`${zone.id}번 ${zone.name} 구역을 삭제할까요?`);
 
@@ -466,11 +507,20 @@ export default function AdminPage() {
 
             <button
               onClick={handleBulkVisitComplete}
-              disabled={bulkCompleting}
+              disabled={bulkCompleting || selectedZones.length === 0}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
             >
               <CheckCircle2 size={16} />
               {bulkCompleting ? "처리 중..." : "선택 방문완료"}
+            </button>
+
+            <button
+              onClick={handleBulkDeleteZones}
+              disabled={bulkDeleting || selectedZones.length === 0}
+              className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+            >
+              <Trash2 size={16} />
+              {bulkDeleting ? "삭제 중..." : "선택 삭제"}
             </button>
 
             <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
