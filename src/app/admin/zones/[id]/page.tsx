@@ -200,7 +200,7 @@ export default function AdminZoneEditPage() {
 
       alert("구역 정보가 저장되었습니다!");
 
-      router.push("/admin");
+      router.push("/admin/zones")
     } catch (error) {
       console.error("구역 저장 에러:", error);
       alert("저장 실패");

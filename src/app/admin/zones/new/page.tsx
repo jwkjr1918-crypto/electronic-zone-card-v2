@@ -44,7 +44,7 @@ export default function NewZonePage() {
 
       alert("새 구역이 추가되었습니다!");
 
-      router.push("/admin");
+      router.push("/admin/zones")
     } catch (error) {
       console.error("구역 추가 에러:", error);
       alert("추가 실패");
