@@ -26,6 +26,8 @@ import {
   MapPin,
   Clock,
   CheckCircle2,
+  X,
+  RotateCw,
 } from "lucide-react";
 
 import { db } from "@/firebase/firebase";
@@ -59,6 +61,8 @@ export default function ZoneDetailPage() {
   const [loading, setLoading] = useState(true);
 
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
+
+  const [imageOpen, setImageOpen] = useState(false);
 
   useEffect(() => {
     async function fetchZone() {
@@ -108,6 +112,18 @@ export default function ZoneDetailPage() {
       fetchRecentVisit();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!imageOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [imageOpen]);
 
   async function handleVisitLog() {
     if (!zone) return;
@@ -176,85 +192,129 @@ export default function ZoneDetailPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4">
-      <div className="mx-auto max-w-3xl">
-        <Link
-          href="/"
-          className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
-        >
-          <ArrowLeft size={18} />
-          메인으로 돌아가기
-        </Link>
+    <>
+      <main className="min-h-screen bg-slate-100 p-4">
+        <div className="mx-auto max-w-3xl">
+          <Link
+            href="/"
+            className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
+          >
+            <ArrowLeft size={18} />
+            메인으로 돌아가기
+          </Link>
 
-        <section className="rounded-3xl bg-slate-900 text-white shadow">
-          <div className="p-6">
-            <p className="text-sm text-slate-300">{zone.region}</p>
+          <section className="rounded-3xl bg-slate-900 text-white shadow">
+            <div className="p-6">
+              <p className="text-sm text-slate-300">{zone.region}</p>
 
-            <h1 className="mt-2 text-4xl font-bold">
-              {zone.id}번 {zone.name}
-            </h1>
+              <h1 className="mt-2 text-4xl font-bold">
+                {zone.id}번 {zone.name}
+              </h1>
 
-            {zone.imageUrl && (
-              <div className="mt-6">
-                <Image
-                  src={zone.imageUrl}
-                  alt={zone.name}
-                  width={1200}
-                  height={800}
-                  className="pointer-events-none h-auto max-h-[520px] w-full object-contain select-none"
-                  priority
-                />
-              </div>
-            )}
+              {zone.imageUrl && (
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setImageOpen(true)}
+                    className="block w-full overflow-hidden rounded-2xl bg-black/20"
+                  >
+                    <Image
+                      src={zone.imageUrl}
+                      alt={zone.name}
+                      width={1200}
+                      height={800}
+                      className="h-auto max-h-[520px] w-full object-contain select-none"
+                      priority
+                    />
+                  </button>
 
-            <div className="mt-6 flex items-center gap-2 text-slate-300">
-              <MapPin size={18} />
-              <span>{zone.region}</span>
-            </div>
-
-            <button
-              onClick={handleVisitLog}
-              className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
-            >
-              <CheckCircle2 size={20} />
-              구역완료
-            </button>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow">
-          <div className="flex items-center gap-2">
-            <Clock size={18} />
-            <h2 className="text-lg font-bold">최근 방문 기록</h2>
-          </div>
-
-          {recentVisit ? (
-            <div className="mt-4 rounded-2xl bg-slate-100 p-4">
-              <p className="font-semibold">
-                {recentVisit.zoneNumber}번 {recentVisit.zoneName}
-              </p>
-
-              {recentVisit.visitorName && (
-                <p className="mt-1 text-sm font-medium text-slate-700">
-                  방문자: {recentVisit.visitorName}
-                </p>
+                  <div className="mt-2 flex items-center justify-center gap-1 text-xs text-slate-400">
+                    <RotateCw size={13} />
+                    이미지를 누르면 모바일 전체화면으로 볼 수 있습니다.
+                  </div>
+                </div>
               )}
 
-              <p className="mt-1 text-sm text-slate-500">
-                {recentVisit.createdAt?.seconds
-                  ? new Date(
-                      recentVisit.createdAt.seconds * 1000
-                    ).toLocaleString()
-                  : "시간 정보 없음"}
-              </p>
+              <div className="mt-6 flex items-center gap-2 text-slate-300">
+                <MapPin size={18} />
+                <span>{zone.region}</span>
+              </div>
+
+              <button
+                onClick={handleVisitLog}
+                className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
+              >
+                <CheckCircle2 size={20} />
+                구역완료
+              </button>
             </div>
-          ) : (
-            <p className="mt-4 text-sm text-slate-500">
-              아직 방문 기록이 없습니다.
-            </p>
-          )}
-        </section>
-      </div>
-    </main>
+          </section>
+
+          <section className="mt-6 rounded-3xl bg-white p-6 shadow">
+            <div className="flex items-center gap-2">
+              <Clock size={18} />
+              <h2 className="text-lg font-bold">최근 방문 기록</h2>
+            </div>
+
+            {recentVisit ? (
+              <div className="mt-4 rounded-2xl bg-slate-100 p-4">
+                <p className="font-semibold">
+                  {recentVisit.zoneNumber}번 {recentVisit.zoneName}
+                </p>
+
+                {recentVisit.visitorName && (
+                  <p className="mt-1 text-sm font-medium text-slate-700">
+                    방문자: {recentVisit.visitorName}
+                  </p>
+                )}
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {recentVisit.createdAt?.seconds
+                    ? new Date(
+                        recentVisit.createdAt.seconds * 1000
+                      ).toLocaleString()
+                    : "시간 정보 없음"}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">
+                아직 방문 기록이 없습니다.
+              </p>
+            )}
+          </section>
+        </div>
+      </main>
+
+      {imageOpen && zone.imageUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+          <button
+            type="button"
+            onClick={() => setImageOpen(false)}
+            className="absolute right-4 top-4 z-10 rounded-full bg-white/15 p-3 text-white backdrop-blur transition hover:bg-white/25"
+            aria-label="이미지 닫기"
+          >
+            <X size={24} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setImageOpen(false)}
+            className="absolute inset-0"
+            aria-label="배경 클릭으로 닫기"
+          />
+
+          <div className="relative z-10 flex h-screen w-screen items-center justify-center overflow-hidden">
+            <Image
+              src={zone.imageUrl}
+              alt={zone.name}
+              width={1600}
+              height={1200}
+              className="max-h-[100vw] max-w-[100vh] rotate-90 object-contain select-none"
+              priority
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
