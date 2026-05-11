@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, Shield, ClipboardList } from "lucide-react";
+import {
+  Search,
+  Shield,
+  ClipboardList,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
+
 import {
   collection,
   getDocs,
@@ -9,6 +16,7 @@ import {
   orderBy,
   Timestamp,
 } from "firebase/firestore";
+
 import Link from "next/link";
 
 import { db } from "@/firebase/firebase";
@@ -151,6 +159,7 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
             후포회중 구역카드
           </h1>
+
           <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
             후포회중구역 방문 관리 시스템
           </p>
@@ -161,6 +170,7 @@ export default function Home() {
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             size={16}
           />
+
           <Input
             placeholder="구역 이름 또는 번호 검색"
             className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
@@ -219,49 +229,97 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {filteredZones.map((zone) => (
-            <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
-              <Card className="cursor-pointer rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                <CardContent className="p-3 sm:p-3.5">
-                  <div className="flex items-start gap-2">
-                    <div className="mt-0.5 shrink-0 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs">
-                      {zone.id}.
+          {filteredZones.map((zone) => {
+            const isVisited = Boolean(zone.lastVisitedAt?.seconds);
+
+            return (
+              <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
+                <Card
+                  className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                    isVisited
+                      ? "border-slate-200 bg-slate-50 opacity-85"
+                      : "border-slate-200 bg-white"
+                  }`}
+                >
+                  <CardContent className="p-3 sm:p-3.5">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <div
+                          className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
+                            isVisited ? "bg-slate-500" : "bg-slate-900"
+                          }`}
+                        >
+                          {zone.id}.
+                        </div>
+
+                        <div className="min-w-0">
+                          <h3
+                            className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                              isVisited ? "text-slate-700" : "text-slate-900"
+                            }`}
+                          >
+                            {zone.name}
+                          </h3>
+
+                          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                            {zone.region}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                          isVisited
+                            ? "bg-slate-200 text-slate-600"
+                            : "bg-blue-50 text-blue-700"
+                        }`}
+                      >
+                        {isVisited ? (
+                          <>
+                            <CheckCircle2 size={11} />
+                            완료
+                          </>
+                        ) : (
+                          <>
+                            <AlertCircle size={11} />
+                            방문 필요
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="min-w-0">
-                      <h3 className="line-clamp-1 text-sm font-bold text-slate-900 sm:text-[15px]">
-                        {zone.name}
-                      </h3>
+                    <div
+                      className={`mt-3 rounded-lg px-2.5 py-2 ${
+                        isVisited ? "bg-slate-100" : "bg-slate-50"
+                      }`}
+                    >
+                      <div className="text-[10px] text-slate-400 sm:text-[11px]">
+                        최근 방문
+                      </div>
 
-                      <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
-                        {zone.region}
-                      </p>
+                      <div
+                        className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
+                          isVisited ? "text-slate-700" : "text-slate-600"
+                        }`}
+                      >
+                        {zone.lastVisitedAt?.seconds
+                          ? new Date(
+                              zone.lastVisitedAt.seconds * 1000
+                            ).toLocaleString("ko-KR", {
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "방문 기록 없음"}
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="mt-3 rounded-lg bg-slate-50 px-2.5 py-2">
-                    <div className="text-[10px] text-slate-400 sm:text-[11px]">
-                      최근 방문
-                    </div>
-
-                    <div className="mt-0.5 line-clamp-1 text-[11px] font-medium text-slate-700 sm:text-xs">
-                      {zone.lastVisitedAt?.seconds
-                        ? new Date(
-                            zone.lastVisitedAt.seconds * 1000
-                          ).toLocaleString("ko-KR", {
-                            year: "numeric",
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "방문 기록 없음"}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </main>
