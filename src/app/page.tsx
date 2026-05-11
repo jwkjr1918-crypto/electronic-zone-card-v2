@@ -242,51 +242,51 @@ export default function Home() {
                   }`}
                 >
                   <CardContent className="p-3 sm:p-3.5">
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-start gap-2">
-                        <div
-                          className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
-                            isVisited ? "bg-slate-500" : "bg-slate-900"
-                          }`}
-                        >
-                          {zone.id}.
-                        </div>
-
-                        <div className="min-w-0">
-                          <h3
-                            className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
-                              isVisited ? "text-slate-700" : "text-slate-900"
-                            }`}
-                          >
-                            {zone.name}
-                          </h3>
-
-                          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
-                            {zone.region}
-                          </p>
-                        </div>
-                      </div>
-
+                   <div className="mb-2">
+                    <div className="flex min-w-0 items-start gap-2">
                       <div
-                        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
-                          isVisited
-                            ? "bg-slate-200 text-slate-600"
-                            : "bg-blue-50 text-blue-700"
+                        className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
+                          isVisited ? "bg-slate-500" : "bg-slate-900"
                         }`}
                       >
-                        {isVisited ? (
-                          <>
-                            <CheckCircle2 size={11} />
-                            완료
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle size={11} />
-                            방문 필요
-                          </>
-                        )}
+                        {zone.id}.
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <h3
+                          className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                            isVisited ? "text-slate-700" : "text-slate-900"
+                          }`}
+                        >
+                          {zone.name}
+                        </h3>
+
+                        <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                          {zone.region}
+                        </p>
                       </div>
                     </div>
+
+                    <div
+                      className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                        isVisited
+                          ? "bg-slate-200 text-slate-600"
+                          : "bg-blue-50 text-blue-700"
+                      }`}
+                    >
+                      {isVisited ? (
+                        <>
+                          <CheckCircle2 size={11} />
+                          완료
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle size={11} />
+                          방문 필요
+                        </>
+                      )}
+                    </div>
+                  </div> 
 
                     <div
                       className={`mt-3 rounded-lg px-2.5 py-2 ${
