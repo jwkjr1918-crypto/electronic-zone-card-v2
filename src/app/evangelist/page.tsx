@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { collection, getDocs } from "firebase/firestore";
 import { ArrowRight, MapPinned, Search } from "lucide-react";
@@ -20,6 +20,14 @@ export default function EvangelistPage() {
 
   const [zoneNumber, setZoneNumber] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const savedNumber = localStorage.getItem("lastEvangelistZoneNumber");
+
+    if (savedNumber) {
+      setZoneNumber(savedNumber);
+    }
+  }, []);
 
   async function handleMove() {
     const trimmedNumber = zoneNumber.trim();
@@ -48,7 +56,10 @@ export default function EvangelistPage() {
         return;
       }
 
-      router.push(`/zone/${matchedZone.firestoreId}`);
+      localStorage.setItem("lastEvangelistZoneNumber", trimmedNumber);
+      sessionStorage.setItem("zoneEntryFrom", "evangelist");
+
+      router.push(`/zone/${matchedZone.firestoreId}?from=evangelist`);
     } catch (error) {
       console.error("구역 이동 에러:", error);
       alert("구역을 찾는 중 문제가 발생했습니다.");
@@ -104,6 +115,13 @@ export default function EvangelistPage() {
               />
             </div>
           </div>
+
+          {zoneNumber && (
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              최근 입력 번호:{" "}
+              <span className="font-bold text-slate-900">{zoneNumber}</span>
+            </div>
+          )}
 
           <button
             onClick={handleMove}

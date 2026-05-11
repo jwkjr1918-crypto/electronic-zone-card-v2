@@ -3,7 +3,11 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import {
+  useParams,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 
 import {
   doc,
@@ -18,7 +22,14 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-import { ArrowLeft, MapPin, Clock, CheckCircle2, X, RotateCw } from "lucide-react";
+import {
+  ArrowLeft,
+  MapPin,
+  Clock,
+  CheckCircle2,
+  X,
+  RotateCw,
+} from "lucide-react";
 
 import { db } from "@/firebase/firebase";
 
@@ -43,12 +54,19 @@ interface VisitLog {
 
 export default function ZoneDetailPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const id = params.id as string;
 
   const [zone, setZone] = useState<Zone | null>(null);
   const [loading, setLoading] = useState(true);
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
+
+  const fromEvangelist =
+    searchParams.get("from") === "evangelist" ||
+    sessionStorage.getItem("zoneEntryFrom") === "evangelist";
 
   useEffect(() => {
     async function fetchZone() {
@@ -159,6 +177,12 @@ export default function ZoneDetailPage() {
       if (visits.length > 0) {
         setRecentVisit(visits[0]);
       }
+
+      if (fromEvangelist) {
+        sessionStorage.removeItem("zoneEntryFrom");
+
+        router.push("/evangelist");
+      }
     } catch (error) {
       console.error("방문 기록 저장 에러:", error);
       alert("저장 실패");
@@ -190,11 +214,13 @@ export default function ZoneDetailPage() {
       <main className="min-h-screen bg-slate-100 p-3 sm:p-4">
         <div className="mx-auto max-w-3xl">
           <Link
-            href="/"
+            href={fromEvangelist ? "/evangelist" : "/"}
             className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
           >
             <ArrowLeft size={18} />
-            메인으로 돌아가기
+            {fromEvangelist
+              ? "번호 입력 화면으로 돌아가기"
+              : "메인으로 돌아가기"}
           </Link>
 
           <section className="rounded-3xl bg-slate-900 text-white shadow">
