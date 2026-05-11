@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Search, Shield, ClipboardList } from "lucide-react";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  Timestamp,
+} from "firebase/firestore";
 import Link from "next/link";
 
 import { db } from "@/firebase/firebase";
@@ -30,7 +36,14 @@ interface Zone {
   id?: number;
   name: string;
   region: string;
-  lastVisitedAt?: any;
+  lastVisitedAt?: Timestamp | null;
+}
+
+interface VisitLogData {
+  zoneId?: string;
+  zoneNumber?: number;
+  zoneName?: string;
+  createdAt?: Timestamp | null;
 }
 
 export default function Home() {
@@ -44,9 +57,9 @@ export default function Home() {
       try {
         const querySnapshot = await getDocs(collection(db, "zones"));
 
-        const zoneData = querySnapshot.docs.map((doc) => ({
-          firestoreId: doc.id,
-          ...doc.data(),
+        const zoneData = querySnapshot.docs.map((zoneDoc) => ({
+          firestoreId: zoneDoc.id,
+          ...zoneDoc.data(),
         })) as Zone[];
 
         const visitQuery = query(
@@ -56,10 +69,10 @@ export default function Home() {
 
         const visitSnapshot = await getDocs(visitQuery);
 
-        const latestVisitMap = new Map<string, any>();
+        const latestVisitMap = new Map<string, Timestamp | null>();
 
-        visitSnapshot.docs.forEach((doc) => {
-          const log = doc.data();
+        visitSnapshot.docs.forEach((visitDoc) => {
+          const log = visitDoc.data() as VisitLogData;
 
           const keys = [
             log.zoneId ? String(log.zoneId) : null,
@@ -69,7 +82,7 @@ export default function Home() {
 
           keys.forEach((key) => {
             if (!latestVisitMap.has(key)) {
-              latestVisitMap.set(key, log.createdAt);
+              latestVisitMap.set(key, log.createdAt || null);
             }
           });
         });
@@ -78,7 +91,8 @@ export default function Home() {
           const latestVisit =
             latestVisitMap.get(zone.firestoreId) ||
             latestVisitMap.get(String(zone.id)) ||
-            latestVisitMap.get(zone.name);
+            latestVisitMap.get(zone.name) ||
+            null;
 
           return {
             ...zone,

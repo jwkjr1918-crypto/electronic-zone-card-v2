@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { collection, getDocs } from "firebase/firestore";
-import { ArrowRight, MapPinned, Search } from "lucide-react";
+import { ArrowRight, Clock3, MapPinned, Search } from "lucide-react";
 
 import { db } from "@/firebase/firebase";
 import { Input } from "@/components/ui/input";
@@ -17,22 +17,38 @@ interface Zone {
 
 export default function EvangelistPage() {
   const router = useRouter();
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [zoneNumber, setZoneNumber] = useState("");
+  const [zoneNumber, setZoneNumber] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("lastEvangelistZoneNumber") || "";
+  });
+
+  const [recentNumbers] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+
+    try {
+      const saved = localStorage.getItem("recentEvangelistNumbers");
+      return saved ? (JSON.parse(saved) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const savedNumber = localStorage.getItem("lastEvangelistZoneNumber");
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 150);
 
-    if (savedNumber) {
-      setZoneNumber(savedNumber);
-    }
+    return () => clearTimeout(timer);
   }, []);
 
-  async function handleMove() {
-    const trimmedNumber = zoneNumber.trim();
+  async function handleMove(customNumber?: string) {
+    const targetNumber = (customNumber || zoneNumber).trim();
 
-    if (!trimmedNumber) {
+    if (!targetNumber) {
       alert("구역 번호를 입력해주세요.");
       return;
     }
@@ -42,21 +58,37 @@ export default function EvangelistPage() {
 
       const querySnapshot = await getDocs(collection(db, "zones"));
 
-      const zones = querySnapshot.docs.map((doc) => ({
-        firestoreId: doc.id,
-        ...doc.data(),
+      const zones = querySnapshot.docs.map((zoneDoc) => ({
+        firestoreId: zoneDoc.id,
+        ...zoneDoc.data(),
       })) as Zone[];
 
       const matchedZone = zones.find(
-        (zone) => String(zone.id) === trimmedNumber
+        (zone) => String(zone.id) === targetNumber
       );
 
       if (!matchedZone) {
-        alert(`${trimmedNumber}번 구역을 찾을 수 없습니다.`);
+        alert(`${targetNumber}번 구역을 찾을 수 없습니다.`);
+
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 100);
+
         return;
       }
 
-      localStorage.setItem("lastEvangelistZoneNumber", trimmedNumber);
+      localStorage.setItem("lastEvangelistZoneNumber", targetNumber);
+
+      const updatedRecentNumbers = [
+        targetNumber,
+        ...recentNumbers.filter((number) => number !== targetNumber),
+      ].slice(0, 5);
+
+      localStorage.setItem(
+        "recentEvangelistNumbers",
+        JSON.stringify(updatedRecentNumbers)
+      );
+
       sessionStorage.setItem("zoneEntryFrom", "evangelist");
 
       router.push(`/zone/${matchedZone.firestoreId}?from=evangelist`);
@@ -102,6 +134,7 @@ export default function EvangelistPage() {
               />
 
               <Input
+                ref={inputRef}
                 value={zoneNumber}
                 onChange={(e) => setZoneNumber(e.target.value)}
                 onKeyDown={(e) => {
@@ -111,25 +144,49 @@ export default function EvangelistPage() {
                 }}
                 inputMode="numeric"
                 placeholder="예: 15"
-                className="h-14 rounded-2xl border-slate-200 bg-slate-50 pl-11 text-lg font-semibold shadow-inner"
+                className="h-16 rounded-2xl border-slate-200 bg-slate-50 pl-11 text-2xl font-bold shadow-inner"
               />
             </div>
           </div>
 
+          {recentNumbers.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-600">
+                <Clock3 size={15} />
+                최근 번호
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {recentNumbers.map((number) => (
+                  <button
+                    key={number}
+                    onClick={() => {
+                      setZoneNumber(number);
+                      handleMove(number);
+                    }}
+                    className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800 transition active:scale-95"
+                  >
+                    {number}번
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {zoneNumber && (
             <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-              최근 입력 번호:{" "}
+              현재 입력 번호:{" "}
               <span className="font-bold text-slate-900">{zoneNumber}</span>
             </div>
           )}
 
           <button
-            onClick={handleMove}
+            onClick={() => handleMove()}
             disabled={loading}
-            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-base font-bold text-white shadow-lg transition active:scale-[0.98] disabled:opacity-50"
+            className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-lg font-bold text-white shadow-lg transition active:scale-[0.98] disabled:opacity-50"
           >
             {loading ? "찾는 중..." : "구역 카드로 이동"}
-            {!loading && <ArrowRight size={19} />}
+            {!loading && <ArrowRight size={20} />}
           </button>
 
           <p className="text-center text-xs leading-5 text-slate-400">

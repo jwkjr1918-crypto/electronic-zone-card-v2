@@ -17,6 +17,7 @@ import {
   deleteDoc,
   writeBatch,
   getDoc,
+  Timestamp,
 } from "firebase/firestore";
 
 import {
@@ -52,7 +53,7 @@ interface VisitLog {
   zoneName: string;
   region: string;
   visitorName?: string;
-  createdAt?: any;
+  createdAt?: Timestamp | null;
 }
 
 export default function VisitsPage() {
@@ -63,8 +64,11 @@ export default function VisitsPage() {
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
+
   const [checkingAuth, setCheckingAuth] = useState(true);
+
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
+
   const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const router = useRouter();
@@ -78,20 +82,25 @@ export default function VisitsPage() {
 
       try {
         const userRef = doc(db, "users", user.uid);
+
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
           await signOut(auth);
+
           router.push("/login");
+
           return;
         }
 
         const userRole = userSnap.data().role;
 
         setRole(userRole);
+
         setCheckingAuth(false);
       } catch (error) {
         console.error("권한 확인 에러:", error);
+
         router.push("/login");
       }
     });
@@ -109,9 +118,9 @@ export default function VisitsPage() {
 
         const querySnapshot = await getDocs(q);
 
-        const logs = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
+        const logs = querySnapshot.docs.map((visitDoc) => ({
+          id: visitDoc.id,
+          ...visitDoc.data(),
         })) as VisitLog[];
 
         setVisitLogs(logs);
@@ -219,6 +228,7 @@ export default function VisitsPage() {
       setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
+
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
@@ -258,6 +268,7 @@ export default function VisitsPage() {
       alert("선택한 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("선택 방문 기록 삭제 에러:", error);
+
       alert("선택 삭제 실패");
     } finally {
       setDeletingSelected(false);
@@ -283,12 +294,15 @@ export default function VisitsPage() {
       await batch.commit();
 
       setVisitLogs([]);
+
       setSelectedLogs([]);
+
       setOpenZone(null);
 
       alert("전체 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("전체 삭제 에러:", error);
+
       alert("전체 삭제 실패");
     } finally {
       setDeletingAll(false);
@@ -298,14 +312,16 @@ export default function VisitsPage() {
   async function handleLogout() {
     try {
       await signOut(auth);
+
       router.push("/login");
     } catch (error) {
       console.error("로그아웃 에러:", error);
+
       alert("로그아웃 실패");
     }
   }
 
-  function formatDate(createdAt: any) {
+  function formatDate(createdAt?: Timestamp | null) {
     if (!createdAt?.seconds) return "시간 없음";
 
     return new Date(createdAt.seconds * 1000).toLocaleString("ko-KR", {
@@ -361,6 +377,7 @@ export default function VisitsPage() {
         <div className="mb-4 rounded-2xl bg-slate-900 p-5 text-white shadow">
           <div className="flex items-center gap-2 text-slate-300">
             <ClipboardList size={18} />
+
             <p className="text-sm">전자구역 방문 관리</p>
           </div>
 

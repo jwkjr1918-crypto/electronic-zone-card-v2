@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const XLSX = require("xlsx");
 
 const admin = require("firebase-admin");

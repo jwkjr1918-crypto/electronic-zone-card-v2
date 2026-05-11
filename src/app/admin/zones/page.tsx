@@ -15,6 +15,7 @@ import {
   query,
   orderBy,
   writeBatch,
+  Timestamp,
 } from "firebase/firestore";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -49,7 +50,7 @@ interface Zone {
   id?: number;
   name: string;
   region: string;
-  lastVisitedAt?: any;
+  lastVisitedAt?: Timestamp | null;
   lastVisitorName?: string;
 }
 
@@ -59,7 +60,7 @@ interface VisitLog {
   zoneName?: string;
   zoneNumber?: number;
   visitorName?: string;
-  createdAt?: any;
+  createdAt?: Timestamp | null;
 }
 
 export default function AdminZonesPage() {
@@ -126,9 +127,9 @@ export default function AdminZonesPage() {
       try {
         const querySnapshot = await getDocs(collection(db, "zones"));
 
-        const zoneData = querySnapshot.docs.map((doc) => ({
-          firestoreId: doc.id,
-          ...doc.data(),
+        const zoneData = querySnapshot.docs.map((zoneDoc) => ({
+          firestoreId: zoneDoc.id,
+          ...zoneDoc.data(),
         })) as Zone[];
 
         const visitQuery = query(
@@ -141,20 +142,20 @@ export default function AdminZonesPage() {
         const latestVisitMap = new Map<
           string,
           {
-            createdAt?: any;
+            createdAt?: Timestamp | null;
             visitorName?: string;
           }
         >();
 
-        visitSnapshot.docs.forEach((doc) => {
+        visitSnapshot.docs.forEach((visitDoc) => {
           const log = {
-            id: doc.id,
-            ...doc.data(),
+            id: visitDoc.id,
+            ...visitDoc.data(),
           } as VisitLog;
 
           if (log.zoneId && !latestVisitMap.has(log.zoneId)) {
             latestVisitMap.set(log.zoneId, {
-              createdAt: log.createdAt,
+              createdAt: log.createdAt || null,
               visitorName: log.visitorName,
             });
           }
@@ -165,7 +166,7 @@ export default function AdminZonesPage() {
 
           return {
             ...zone,
-            lastVisitedAt: latestVisit?.createdAt,
+            lastVisitedAt: latestVisit?.createdAt || null,
             lastVisitorName: latestVisit?.visitorName,
           };
         });
@@ -212,7 +213,7 @@ export default function AdminZonesPage() {
     filteredZones.length > 0 &&
     filteredZones.every((zone) => selectedZones.includes(zone.firestoreId));
 
-  function formatDate(createdAt: any) {
+  function formatDate(createdAt?: Timestamp | null) {
     if (!createdAt?.seconds) return "방문 기록 없음";
 
     return new Date(createdAt.seconds * 1000).toLocaleString("ko-KR", {
@@ -282,9 +283,7 @@ export default function AdminZonesPage() {
         )
       );
 
-      const nowPlaceholder = {
-        seconds: Math.floor(Date.now() / 1000),
-      };
+      const nowPlaceholder = Timestamp.fromDate(new Date());
 
       setZones((prev) =>
         prev.map((zone) =>
