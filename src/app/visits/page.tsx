@@ -7,6 +7,8 @@ import { db, auth } from "@/firebase/firebase";
 import { useEffect, useMemo, useState } from "react";
 
 import Link from "next/link";
+import PizZip from "pizzip";
+import { saveAs } from "file-saver";
 
 import {
   collection,
@@ -30,6 +32,7 @@ import {
   ChevronUp,
   LogOut,
   User,
+  FileText,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -45,6 +48,10 @@ const regions = [
   "창수면",
   "축산면",
 ];
+
+const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const TOTAL_ZONE_COUNT = 484;
+const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 
 interface VisitLog {
   id: string;
@@ -64,11 +71,10 @@ export default function VisitsPage() {
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
+  const [generatingWord, setGeneratingWord] = useState(false);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
-
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
-
   const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const router = useRouter();
@@ -82,25 +88,20 @@ export default function VisitsPage() {
 
       try {
         const userRef = doc(db, "users", user.uid);
-
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
           await signOut(auth);
-
           router.push("/login");
-
           return;
         }
 
         const userRole = userSnap.data().role;
 
         setRole(userRole);
-
         setCheckingAuth(false);
       } catch (error) {
         console.error("권한 확인 에러:", error);
-
         router.push("/login");
       }
     });
@@ -136,9 +137,7 @@ export default function VisitsPage() {
 
   const filteredLogs = useMemo(() => {
     return visitLogs.filter((log) => {
-      return selectedRegion === "전체"
-        ? true
-        : log.region === selectedRegion;
+      return selectedRegion === "전체" ? true : log.region === selectedRegion;
     });
   }, [visitLogs, selectedRegion]);
 
@@ -228,7 +227,6 @@ export default function VisitsPage() {
       setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
-
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
@@ -268,7 +266,6 @@ export default function VisitsPage() {
       alert("선택한 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("선택 방문 기록 삭제 에러:", error);
-
       alert("선택 삭제 실패");
     } finally {
       setDeletingSelected(false);
@@ -294,15 +291,12 @@ export default function VisitsPage() {
       await batch.commit();
 
       setVisitLogs([]);
-
       setSelectedLogs([]);
-
       setOpenZone(null);
 
       alert("전체 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("전체 삭제 에러:", error);
-
       alert("전체 삭제 실패");
     } finally {
       setDeletingAll(false);
@@ -312,11 +306,9 @@ export default function VisitsPage() {
   async function handleLogout() {
     try {
       await signOut(auth);
-
       router.push("/login");
     } catch (error) {
       console.error("로그아웃 에러:", error);
-
       alert("로그아웃 실패");
     }
   }
@@ -331,6 +323,214 @@ export default function VisitsPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  }
+
+  function formatWordDate(createdAt?: Timestamp | null) {
+    if (!createdAt?.seconds) return "";
+
+    const date = new Date(createdAt.seconds * 1000);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}.${month}.${day}`;
+  }
+
+  function getServiceYear() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    return month >= 9 ? year + 1 : year;
+  }
+
+  function getTextCells(row: Element) {
+    return Array.from(row.getElementsByTagNameNS(WORD_NS, "tc"));
+  }
+
+  function createTextParagraph(xmlDoc: XMLDocument, text: string) {
+    const paragraph = xmlDoc.createElementNS(WORD_NS, "w:p");
+    const paragraphProperties = xmlDoc.createElementNS(WORD_NS, "w:pPr");
+    const justify = xmlDoc.createElementNS(WORD_NS, "w:jc");
+
+    justify.setAttributeNS(WORD_NS, "w:val", "center");
+    paragraphProperties.appendChild(justify);
+
+    const run = xmlDoc.createElementNS(WORD_NS, "w:r");
+    const runProperties = xmlDoc.createElementNS(WORD_NS, "w:rPr");
+    const size = xmlDoc.createElementNS(WORD_NS, "w:sz");
+    const sizeCs = xmlDoc.createElementNS(WORD_NS, "w:szCs");
+
+    size.setAttributeNS(WORD_NS, "w:val", "18");
+    sizeCs.setAttributeNS(WORD_NS, "w:val", "18");
+
+    runProperties.appendChild(size);
+    runProperties.appendChild(sizeCs);
+
+    const textNode = xmlDoc.createElementNS(WORD_NS, "w:t");
+    textNode.textContent = text;
+
+    run.appendChild(runProperties);
+    run.appendChild(textNode);
+
+    paragraph.appendChild(paragraphProperties);
+    paragraph.appendChild(run);
+
+    return paragraph;
+  }
+
+  function setCellText(xmlDoc: XMLDocument, cell: Element | undefined, text: string) {
+    if (!cell) return;
+
+    Array.from(cell.getElementsByTagNameNS(WORD_NS, "p")).forEach((paragraph) => {
+      if (paragraph.parentNode === cell) {
+        cell.removeChild(paragraph);
+      }
+    });
+
+    cell.appendChild(createTextParagraph(xmlDoc, text));
+  }
+
+  function getLogsByZoneNumber() {
+    const map = new Map<number, VisitLog[]>();
+
+    visitLogs.forEach((log) => {
+      if (!log.zoneNumber) return;
+
+      if (!map.has(log.zoneNumber)) {
+        map.set(log.zoneNumber, []);
+      }
+
+      map.get(log.zoneNumber)?.push(log);
+    });
+
+    map.forEach((logs) => {
+      logs.sort((a, b) => {
+        const aTime = a.createdAt?.seconds ?? 0;
+        const bTime = b.createdAt?.seconds ?? 0;
+
+        return aTime - bTime;
+      });
+    });
+
+    return map;
+  }
+
+  async function handleDownloadWord() {
+    try {
+      setGeneratingWord(true);
+
+      const response = await fetch(encodeURI(WORD_TEMPLATE_PATH));
+
+      if (!response.ok) {
+        alert(
+          "Word 양식 파일을 찾을 수 없습니다.\npublic/templates/구역배정기록 S-13_KO.docx 위치를 확인해주세요."
+        );
+        return;
+      }
+
+      const templateBuffer = await response.arrayBuffer();
+      const zip = new PizZip(templateBuffer);
+      const documentFile = zip.file("word/document.xml");
+
+      if (!documentFile) {
+        alert("Word 문서 구조를 읽을 수 없습니다.");
+        return;
+      }
+
+      const documentXml = documentFile.asText();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(documentXml, "application/xml");
+
+      const tables = Array.from(xmlDoc.getElementsByTagNameNS(WORD_NS, "tbl"));
+      const serviceYearTable = tables[0];
+      const recordTable = tables[1];
+
+      if (!serviceYearTable || !recordTable) {
+        alert("Word 양식의 표 구조를 찾을 수 없습니다.");
+        return;
+      }
+
+      const serviceYearCells = getTextCells(serviceYearTable);
+      setCellText(xmlDoc, serviceYearCells[1], String(getServiceYear()));
+
+      const originalRows = Array.from(
+        recordTable.getElementsByTagNameNS(WORD_NS, "tr")
+      );
+
+      const headerRows = originalRows.slice(0, 2);
+      const firstDataRowTemplate = originalRows[2];
+      const secondDataRowTemplate = originalRows[3];
+
+      if (!firstDataRowTemplate || !secondDataRowTemplate) {
+        alert("Word 양식의 데이터 줄 구조를 찾을 수 없습니다.");
+        return;
+      }
+
+      originalRows.slice(2).forEach((row) => {
+        recordTable.removeChild(row);
+      });
+
+      const logsByZoneNumber = getLogsByZoneNumber();
+
+      for (let zoneNumber = 1; zoneNumber <= TOTAL_ZONE_COUNT; zoneNumber += 1) {
+        const firstRow = firstDataRowTemplate.cloneNode(true) as Element;
+        const secondRow = secondDataRowTemplate.cloneNode(true) as Element;
+
+        const firstRowCells = getTextCells(firstRow);
+        const secondRowCells = getTextCells(secondRow);
+
+        const zoneLogs = logsByZoneNumber.get(zoneNumber) || [];
+        const latestLog = zoneLogs[zoneLogs.length - 1];
+
+        setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
+        setCellText(xmlDoc, firstRowCells[1], formatWordDate(latestLog?.createdAt));
+
+        setCellText(xmlDoc, firstRowCells[2], latestLog?.visitorName || "");
+        setCellText(xmlDoc, secondRowCells[2], formatWordDate(latestLog?.createdAt));
+        setCellText(xmlDoc, secondRowCells[3], formatWordDate(latestLog?.createdAt));
+
+        for (let index = 3; index < firstRowCells.length; index += 1) {
+          setCellText(xmlDoc, firstRowCells[index], "");
+        }
+
+        for (let index = 4; index < secondRowCells.length; index += 1) {
+          setCellText(xmlDoc, secondRowCells[index], "");
+        }
+
+        recordTable.appendChild(firstRow);
+        recordTable.appendChild(secondRow);
+      }
+
+      headerRows.forEach((row) => {
+        if (!row.parentNode) {
+          recordTable.insertBefore(row, recordTable.firstChild);
+        }
+      });
+
+      const serializer = new XMLSerializer();
+      const updatedXml = serializer.serializeToString(xmlDoc);
+
+      zip.file("word/document.xml", updatedXml);
+
+      const blob = zip.generate({
+        type: "blob",
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+
+      const today = new Date();
+      const fileDate = `${today.getFullYear()}-${String(
+        today.getMonth() + 1
+      ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+      saveAs(blob, `구역배정기록-${getServiceYear()}봉사연도-${fileDate}.docx`);
+    } catch (error) {
+      console.error("Word 기록 다운로드 에러:", error);
+      alert("Word 기록 다운로드 실패");
+    } finally {
+      setGeneratingWord(false);
+    }
   }
 
   if (checkingAuth) {
@@ -377,7 +577,6 @@ export default function VisitsPage() {
         <div className="mb-4 rounded-2xl bg-slate-900 p-5 text-white shadow">
           <div className="flex items-center gap-2 text-slate-300">
             <ClipboardList size={18} />
-
             <p className="text-sm">전자구역 방문 관리</p>
           </div>
 
@@ -392,6 +591,15 @@ export default function VisitsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleDownloadWord}
+                disabled={generatingWord || loading}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                <FileText size={14} />
+                {generatingWord ? "생성 중..." : "Word 기록 다운로드"}
+              </button>
+
               {visitLogs.length > 0 && (
                 <button
                   onClick={handleDeleteAll}
