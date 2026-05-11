@@ -1,11 +1,8 @@
 "use client";
 
 import Image from "next/image";
-
 import { useEffect, useState } from "react";
-
 import Link from "next/link";
-
 import { useParams } from "next/navigation";
 
 import {
@@ -21,14 +18,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-import {
-  ArrowLeft,
-  MapPin,
-  Clock,
-  CheckCircle2,
-  X,
-  RotateCw,
-} from "lucide-react";
+import { ArrowLeft, MapPin, Clock, CheckCircle2, X, RotateCw } from "lucide-react";
 
 import { db } from "@/firebase/firebase";
 
@@ -53,28 +43,21 @@ interface VisitLog {
 
 export default function ZoneDetailPage() {
   const params = useParams();
-
   const id = params.id as string;
 
   const [zone, setZone] = useState<Zone | null>(null);
-
   const [loading, setLoading] = useState(true);
-
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
-
   const [imageOpen, setImageOpen] = useState(false);
 
   useEffect(() => {
     async function fetchZone() {
       try {
         const docRef = doc(db, "zones", id);
-
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          const data = docSnap.data() as Zone;
-
-          setZone(data);
+          setZone(docSnap.data() as Zone);
         }
       } catch (error) {
         console.error("구역 조회 에러:", error);
@@ -117,13 +100,25 @@ export default function ZoneDetailPage() {
     if (!imageOpen) return;
 
     const originalOverflow = document.body.style.overflow;
-
     document.body.style.overflow = "hidden";
+
+    window.history.pushState({ imageOpen: true }, "");
+
+    const handlePopState = () => {
+      setImageOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
 
     return () => {
       document.body.style.overflow = originalOverflow;
+      window.removeEventListener("popstate", handlePopState);
     };
   }, [imageOpen]);
+
+  function closeImage() {
+    setImageOpen(false);
+  }
 
   async function handleVisitLog() {
     if (!zone) return;
@@ -166,7 +161,6 @@ export default function ZoneDetailPage() {
       }
     } catch (error) {
       console.error("방문 기록 저장 에러:", error);
-
       alert("저장 실패");
     }
   }
@@ -193,26 +187,26 @@ export default function ZoneDetailPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-slate-100 p-4">
+      <main className="min-h-screen bg-slate-100 p-3 sm:p-4">
         <div className="mx-auto max-w-3xl">
           <Link
             href="/"
-            className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
+            className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
           >
             <ArrowLeft size={18} />
             메인으로 돌아가기
           </Link>
 
           <section className="rounded-3xl bg-slate-900 text-white shadow">
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               <p className="text-sm text-slate-300">{zone.region}</p>
 
-              <h1 className="mt-2 text-4xl font-bold">
+              <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
                 {zone.id}번 {zone.name}
               </h1>
 
               {zone.imageUrl && (
-                <div className="mt-6">
+                <div className="mt-4">
                   <button
                     type="button"
                     onClick={() => setImageOpen(true)}
@@ -221,28 +215,28 @@ export default function ZoneDetailPage() {
                     <Image
                       src={zone.imageUrl}
                       alt={zone.name}
-                      width={1200}
-                      height={800}
-                      className="h-auto max-h-[520px] w-full object-contain select-none"
+                      width={1600}
+                      height={1200}
+                      className="h-auto max-h-[72vh] w-full object-contain select-none"
                       priority
                     />
                   </button>
 
                   <div className="mt-2 flex items-center justify-center gap-1 text-xs text-slate-400">
                     <RotateCw size={13} />
-                    이미지를 누르면 모바일 전체화면으로 볼 수 있습니다.
+                    이미지를 누르면 회전된 전체화면으로 볼 수 있습니다.
                   </div>
                 </div>
               )}
 
-              <div className="mt-6 flex items-center gap-2 text-slate-300">
+              <div className="mt-5 flex items-center gap-2 text-slate-300">
                 <MapPin size={18} />
                 <span>{zone.region}</span>
               </div>
 
               <button
                 onClick={handleVisitLog}
-                className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
               >
                 <CheckCircle2 size={20} />
                 구역완료
@@ -250,7 +244,7 @@ export default function ZoneDetailPage() {
             </div>
           </section>
 
-          <section className="mt-6 rounded-3xl bg-white p-6 shadow">
+          <section className="mt-5 rounded-3xl bg-white p-5 shadow">
             <div className="flex items-center gap-2">
               <Clock size={18} />
               <h2 className="text-lg font-bold">최근 방문 기록</h2>
@@ -286,30 +280,39 @@ export default function ZoneDetailPage() {
       </main>
 
       {imageOpen && zone.imageUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+        <div className="fixed inset-0 z-50 bg-black">
           <button
             type="button"
-            onClick={() => setImageOpen(false)}
-            className="absolute right-4 top-4 z-10 rounded-full bg-white/15 p-3 text-white backdrop-blur transition hover:bg-white/25"
+            onClick={closeImage}
+            className="absolute right-4 top-4 z-[60] rounded-full bg-white/20 p-3 text-white backdrop-blur transition hover:bg-white/30 active:scale-95"
             aria-label="이미지 닫기"
           >
-            <X size={24} />
+            <X size={26} />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setImageOpen(false)}
-            className="absolute inset-0"
-            aria-label="배경 클릭으로 닫기"
-          />
-
-          <div className="relative z-10 flex h-screen w-screen items-center justify-center overflow-hidden">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={closeImage}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                closeImage();
+              }
+            }}
+            className="flex h-dvh w-dvw items-center justify-center overflow-hidden"
+          >
             <Image
               src={zone.imageUrl}
               alt={zone.name}
-              width={1600}
-              height={1200}
-              className="max-h-[100vw] max-w-[100vh] rotate-90 object-contain select-none"
+              width={1800}
+              height={1400}
+              className="rotate-90 object-contain select-none"
+              style={{
+                width: "100dvh",
+                height: "100dvw",
+                maxWidth: "100dvh",
+                maxHeight: "100dvw",
+              }}
               priority
             />
           </div>
