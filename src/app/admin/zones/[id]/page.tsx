@@ -1,33 +1,21 @@
 "use client";
 
 import Image from "next/image";
-
 import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 
-import {
-  useParams,
-  useRouter,
-} from "next/navigation";
-
-import {
-  doc,
-  getDoc,
-  updateDoc,
-} from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 import {
   ref,
   uploadBytes,
   getDownloadURL,
+  listAll,
+  deleteObject,
 } from "firebase/storage";
 
-import {
-  ArrowLeft,
-  Save,
-  Image as ImageIcon,
-} from "lucide-react";
-
-import Link from "next/link";
+import { ArrowLeft, Save, Image as ImageIcon } from "lucide-react";
 
 import { db, storage } from "@/firebase/firebase";
 
@@ -74,13 +62,7 @@ const compressImage = (file: File): Promise<File> => {
         return;
       }
 
-      ctx.drawImage(
-        img,
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      );
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       canvas.toBlob(
         (blob) => {
@@ -152,9 +134,27 @@ export default function AdminZoneEditPage() {
     }
   }, [id]);
 
-  async function handleImageUpload(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
+  async function deleteExistingZoneImages() {
+    const folderRef = ref(storage, `zones/${id}`);
+
+    try {
+      const existingFiles = await listAll(folderRef);
+
+      await Promise.all(
+        existingFiles.items.map(async (itemRef) => {
+          try {
+            await deleteObject(itemRef);
+          } catch (error) {
+            console.error("기존 이미지 삭제 실패:", error);
+          }
+        })
+      );
+    } catch (error) {
+      console.error("기존 이미지 조회 실패:", error);
+    }
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
 
     if (!file) return;
@@ -163,6 +163,8 @@ export default function AdminZoneEditPage() {
       setUploading(true);
 
       const compressedFile = await compressImage(file);
+
+      await deleteExistingZoneImages();
 
       const storageRef = ref(
         storage,
@@ -175,7 +177,7 @@ export default function AdminZoneEditPage() {
 
       setImageUrl(downloadURL);
 
-      alert("이미지 업로드 완료! 저장 버튼을 눌러주세요.");
+      alert("기존 이미지를 삭제하고 새 이미지로 교체했습니다. 저장 버튼을 눌러주세요.");
     } catch (error) {
       console.error("이미지 업로드 에러:", error);
       alert("이미지 업로드 실패");
@@ -200,7 +202,7 @@ export default function AdminZoneEditPage() {
 
       alert("구역 정보가 저장되었습니다!");
 
-      router.push("/admin/zones")
+      router.push("/admin/zones");
     } catch (error) {
       console.error("구역 저장 에러:", error);
       alert("저장 실패");
@@ -242,13 +244,9 @@ export default function AdminZoneEditPage() {
         </Link>
 
         <section className="rounded-3xl bg-white p-6 shadow">
-          <p className="text-sm text-slate-400">
-            관리자 구역 수정
-          </p>
+          <p className="text-sm text-slate-400">관리자 구역 수정</p>
 
-          <h1 className="mt-2 text-3xl font-bold">
-            {zone.id}번 구역 수정
-          </h1>
+          <h1 className="mt-2 text-3xl font-bold">{zone.id}번 구역 수정</h1>
 
           <div className="mt-8 space-y-6">
             <div>
@@ -275,10 +273,7 @@ export default function AdminZoneEditPage() {
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none"
               >
                 {regions.map((regionItem) => (
-                  <option
-                    key={regionItem}
-                    value={regionItem}
-                  >
+                  <option key={regionItem} value={regionItem}>
                     {regionItem}
                   </option>
                 ))}
@@ -295,12 +290,13 @@ export default function AdminZoneEditPage() {
                 type="file"
                 accept="image/*"
                 onChange={handleImageUpload}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                disabled={uploading || saving}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 disabled:opacity-50"
               />
 
               {uploading && (
                 <p className="mt-3 text-sm text-slate-500">
-                  이미지 업로드 중...
+                  기존 이미지를 삭제하고 새 이미지를 업로드 중...
                 </p>
               )}
 
@@ -311,13 +307,14 @@ export default function AdminZoneEditPage() {
                     alt="구역 이미지"
                     width={1200}
                     height={800}
-                    className="h-auto w-full max-h-[420px] object-contain"
+                    className="h-auto max-h-[420px] w-full object-contain"
                   />
                 </div>
               )}
 
               <p className="mt-2 text-xs text-slate-400">
-                업로드 후 저장 버튼을 눌러야 반영됩니다.
+                새 이미지를 업로드하면 기존 Storage 이미지는 자동 삭제됩니다.
+                업로드 후 저장 버튼을 눌러야 구역 정보에 최종 반영됩니다.
               </p>
             </div>
 
