@@ -63,11 +63,8 @@ export default function VisitsPage() {
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
-
   const [checkingAuth, setCheckingAuth] = useState(true);
-
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
-
   const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const router = useRouter();
@@ -81,25 +78,20 @@ export default function VisitsPage() {
 
       try {
         const userRef = doc(db, "users", user.uid);
-
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
           await signOut(auth);
-
           router.push("/login");
-
           return;
         }
 
         const userRole = userSnap.data().role;
 
         setRole(userRole);
-
         setCheckingAuth(false);
       } catch (error) {
         console.error("권한 확인 에러:", error);
-
         router.push("/login");
       }
     });
@@ -173,6 +165,25 @@ export default function VisitsPage() {
     );
   }
 
+  function toggleZoneLogs(logs: VisitLog[]) {
+    const zoneIds = logs.map((log) => log.id);
+    const allZoneSelected = zoneIds.every((id) => selectedLogs.includes(id));
+
+    if (allZoneSelected) {
+      setSelectedLogs((prev) => prev.filter((id) => !zoneIds.includes(id)));
+    } else {
+      setSelectedLogs((prev) => {
+        const next = new Set(prev);
+
+        zoneIds.forEach((id) => {
+          next.add(id);
+        });
+
+        return Array.from(next);
+      });
+    }
+  }
+
   function toggleAllFilteredLogs() {
     const filteredIds = filteredLogs.map((log) => log.id);
 
@@ -208,7 +219,6 @@ export default function VisitsPage() {
       setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
-
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
@@ -248,7 +258,6 @@ export default function VisitsPage() {
       alert("선택한 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("선택 방문 기록 삭제 에러:", error);
-
       alert("선택 삭제 실패");
     } finally {
       setDeletingSelected(false);
@@ -274,15 +283,12 @@ export default function VisitsPage() {
       await batch.commit();
 
       setVisitLogs([]);
-
       setSelectedLogs([]);
-
       setOpenZone(null);
 
       alert("전체 방문 기록이 삭제되었습니다.");
     } catch (error) {
       console.error("전체 삭제 에러:", error);
-
       alert("전체 삭제 실패");
     } finally {
       setDeletingAll(false);
@@ -292,11 +298,9 @@ export default function VisitsPage() {
   async function handleLogout() {
     try {
       await signOut(auth);
-
       router.push("/login");
     } catch (error) {
       console.error("로그아웃 에러:", error);
-
       alert("로그아웃 실패");
     }
   }
@@ -357,7 +361,6 @@ export default function VisitsPage() {
         <div className="mb-4 rounded-2xl bg-slate-900 p-5 text-white shadow">
           <div className="flex items-center gap-2 text-slate-300">
             <ClipboardList size={18} />
-
             <p className="text-sm">전자구역 방문 관리</p>
           </div>
 
@@ -436,57 +439,81 @@ export default function VisitsPage() {
           <div className="space-y-2">
             {groupedLogs.map(({ zoneName, logs, latestLog }) => {
               const isOpen = openZone === zoneName;
+              const selectedCount = logs.filter((log) =>
+                selectedLogs.includes(log.id)
+              ).length;
+              const allZoneSelected =
+                logs.length > 0 &&
+                logs.every((log) => selectedLogs.includes(log.id));
 
               return (
                 <div
                   key={zoneName}
-                  className="overflow-hidden rounded-2xl bg-white shadow"
+                  className={`overflow-hidden rounded-2xl bg-white shadow ${
+                    selectedCount > 0 ? "ring-2 ring-red-200" : ""
+                  }`}
                 >
-                  <button
-                    onClick={() => setOpenZone(isOpen ? null : zoneName)}
-                    className="flex w-full items-center justify-between gap-3 p-4 text-left"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                          {latestLog.zoneNumber ?? latestLog.zoneId}.
-                        </span>
+                  <div className="flex w-full items-center gap-3 p-4">
+                    <input
+                      type="checkbox"
+                      checked={allZoneSelected}
+                      onChange={() => toggleZoneLogs(logs)}
+                      className="h-6 w-6 shrink-0 accent-red-500"
+                      aria-label={`${latestLog.zoneName} 방문기록 선택`}
+                    />
 
-                        <span className="truncate text-base font-bold text-slate-900">
-                          {latestLog.zoneName}
-                        </span>
-
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">
-                          {logs.length}개
-                        </span>
-                      </div>
-
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                        <span className="flex items-center gap-1">
-                          <MapPin size={13} />
-                          {latestLog.region || "지역 정보 없음"}
-                        </span>
-
-                        {latestLog.visitorName && (
-                          <span className="flex items-center gap-1 font-medium text-slate-700">
-                            <User size={13} />
-                            최근 방문자: {latestLog.visitorName}
+                    <button
+                      onClick={() => setOpenZone(isOpen ? null : zoneName)}
+                      className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                            {latestLog.zoneNumber ?? latestLog.zoneId}.
                           </span>
-                        )}
 
-                        <span className="flex items-center gap-1">
-                          <Clock3 size={13} />
-                          {formatDate(latestLog.createdAt)}
-                        </span>
+                          <span className="truncate text-base font-bold text-slate-900">
+                            {latestLog.zoneName}
+                          </span>
+
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">
+                            기록 {logs.length}개
+                          </span>
+
+                          {selectedCount > 0 && (
+                            <span className="rounded-full bg-red-500 px-2 py-1 text-xs font-semibold text-white">
+                              선택됨 {selectedCount}개
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <MapPin size={13} />
+                            {latestLog.region || "지역 정보 없음"}
+                          </span>
+
+                          {latestLog.visitorName && (
+                            <span className="flex items-center gap-1 font-medium text-slate-700">
+                              <User size={13} />
+                              최근 방문자: {latestLog.visitorName}
+                            </span>
+                          )}
+
+                          <span className="flex items-center gap-1">
+                            <Clock3 size={13} />
+                            {formatDate(latestLog.createdAt)}
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
-                    {isOpen ? (
-                      <ChevronUp size={20} />
-                    ) : (
-                      <ChevronDown size={20} />
-                    )}
-                  </button>
+                      {isOpen ? (
+                        <ChevronUp size={20} className="shrink-0" />
+                      ) : (
+                        <ChevronDown size={20} className="shrink-0" />
+                      )}
+                    </button>
+                  </div>
 
                   {isOpen && (
                     <div className="border-t border-slate-100 bg-slate-50 p-3">
@@ -499,7 +526,7 @@ export default function VisitsPage() {
                               key={log.id}
                               className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${
                                 checked
-                                  ? "bg-red-50 ring-2 ring-red-100"
+                                  ? "bg-red-100 ring-2 ring-red-300"
                                   : "bg-white"
                               }`}
                             >
@@ -508,7 +535,7 @@ export default function VisitsPage() {
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => toggleLog(log.id)}
-                                  className="h-4 w-4 shrink-0 accent-red-500"
+                                  className="h-6 w-6 shrink-0 accent-red-500"
                                 />
 
                                 <div className="min-w-0">
