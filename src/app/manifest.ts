@@ -2,27 +2,20 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "전자구역 카드",
-
-    short_name: "구역카드",
-
-    description: "영덕 전자구역 방문 관리 시스템",
-
+    name: "구역카드(인도자용)",
+    short_name: "구역카드(인도자용)",
+    description: "후포 회중 구역 방문 관리 시스템",
     start_url: "/",
-
+    scope: "/",
     display: "standalone",
-
     background_color: "#f1f5f9",
-
     theme_color: "#0f172a",
-
     icons: [
       {
         src: "/icon-192.png",
         sizes: "192x192",
         type: "image/png",
       },
-
       {
         src: "/icon-512.png",
         sizes: "512x512",

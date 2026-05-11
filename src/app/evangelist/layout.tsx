@@ -5,6 +5,8 @@ export const metadata: Metadata = {
   description: "전도인용 구역 번호 바로가기",
   appleWebApp: {
     title: "구역카드(전도인)",
+    capable: true,
+    statusBarStyle: "default",
   },
 };
 

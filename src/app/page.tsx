@@ -149,10 +149,10 @@ export default function Home() {
 
         <div className="mb-4">
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            전자구역 카드
+            후포회중 구역카드
           </h1>
           <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
-            영덕 전자구역 방문 관리 시스템
+            후포회중구역 방문 관리 시스템
           </p>
         </div>
 
