@@ -191,7 +191,7 @@ export default function Home() {
                 : "bg-white text-slate-600"
             }`}
           >
-            번호순
+            모두 표시
           </button>
         </div>
 
