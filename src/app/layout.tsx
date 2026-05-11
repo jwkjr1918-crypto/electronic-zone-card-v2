@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "전자구역 카드",
+  title: "구역카드(인도자용)",
   description: "영덕 전자구역 방문 관리 시스템",
-
+  appleWebApp: {
+    title: "구역카드(인도자용)",
+  },
   icons: {
     icon: [
       {
@@ -18,7 +20,6 @@ export const metadata: Metadata = {
         type: "image/png",
       },
     ],
-
     apple: [
       {
         url: "/apple-touch-icon.png",
