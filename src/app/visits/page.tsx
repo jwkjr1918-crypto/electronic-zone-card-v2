@@ -31,6 +31,20 @@ import {
   User,
 } from "lucide-react";
 
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const regions = [
+  "전체",
+  "후포면",
+  "평해면",
+  "온정면",
+  "기성면",
+  "영해면",
+  "병곡면",
+  "창수면",
+  "축산면",
+];
+
 interface VisitLog {
   id: string;
   zoneId?: string;
@@ -51,6 +65,8 @@ export default function VisitsPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
+
+  const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const router = useRouter();
 
@@ -116,9 +132,15 @@ export default function VisitsPage() {
   }, []);
 
   const groupedLogs = useMemo(() => {
+    const filteredLogs = visitLogs.filter((log) => {
+      return selectedRegion === "전체"
+        ? true
+        : log.region === selectedRegion;
+    });
+
     const map = new Map<string, VisitLog[]>();
 
-    visitLogs.forEach((log) => {
+    filteredLogs.forEach((log) => {
       const key = log.zoneName || log.zoneId || log.id;
 
       if (!map.has(key)) {
@@ -133,7 +155,7 @@ export default function VisitsPage() {
       logs,
       latestLog: logs[0],
     }));
-  }, [visitLogs]);
+  }, [visitLogs, selectedRegion]);
 
   async function handleDeleteLog(log: VisitLog) {
     const ok = confirm(`${log.zoneName} 방문 기록 1개를 삭제할까요?`);
@@ -274,6 +296,21 @@ export default function VisitsPage() {
           </div>
         </div>
 
+        <Tabs defaultValue="전체" className="mb-4">
+          <TabsList className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-2xl bg-slate-200/70 p-2">
+            {regions.map((region) => (
+              <TabsTrigger
+                key={region}
+                value={region}
+                onClick={() => setSelectedRegion(region)}
+                className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+              >
+                {region}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
         {loading ? (
           <div className="rounded-2xl bg-white p-6 shadow">불러오는 중...</div>
         ) : groupedLogs.length === 0 ? (
@@ -329,7 +366,11 @@ export default function VisitsPage() {
                       </div>
                     </div>
 
-                    {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                    {isOpen ? (
+                      <ChevronUp size={20} />
+                    ) : (
+                      <ChevronDown size={20} />
+                    )}
                   </button>
 
                   {isOpen && (
