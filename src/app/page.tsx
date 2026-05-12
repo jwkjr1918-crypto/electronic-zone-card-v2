@@ -27,17 +27,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const regions = [
-  "전체",
-  "후포면",
-  "평해면",
-  "온정면",
-  "기성면",
-  "영해면",
-  "병곡면",
-  "창수면",
-  "축산면",
-];
+const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
+
+const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
+
+type RegionGroup = "전체" | "후포지역" | "영해지역";
 
 type SortType = "todo" | "number";
 
@@ -65,13 +59,22 @@ export default function Home() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [selectedRegion, setSelectedRegion] = useState("전체");
-  const [sortType, setSortType] = useState<SortType>("todo");
+
+  const [selectedRegionGroup, setSelectedRegionGroup] =
+    useState<RegionGroup>("전체");
+
+  const [selectedSubRegion, setSelectedSubRegion] =
+    useState("전체");
+
+  const [sortType, setSortType] =
+    useState<SortType>("todo");
 
   useEffect(() => {
     async function fetchZones() {
       try {
-        const querySnapshot = await getDocs(collection(db, "zones"));
+        const querySnapshot = await getDocs(
+          collection(db, "zones")
+        );
 
         const zoneData = querySnapshot.docs.map((zoneDoc) => ({
           firestoreId: zoneDoc.id,
@@ -85,20 +88,28 @@ export default function Home() {
 
         const visitSnapshot = await getDocs(visitQuery);
 
-        const latestVisitMap = new Map<string, Timestamp | null>();
+        const latestVisitMap = new Map<
+          string,
+          Timestamp | null
+        >();
 
         visitSnapshot.docs.forEach((visitDoc) => {
           const log = visitDoc.data() as VisitLogData;
 
           const keys = [
             log.zoneId ? String(log.zoneId) : null,
-            log.zoneNumber ? String(log.zoneNumber) : null,
+            log.zoneNumber
+              ? String(log.zoneNumber)
+              : null,
             log.zoneName ? String(log.zoneName) : null,
           ].filter(Boolean) as string[];
 
           keys.forEach((key) => {
             if (!latestVisitMap.has(key)) {
-              latestVisitMap.set(key, log.createdAt || null);
+              latestVisitMap.set(
+                key,
+                log.createdAt || null
+              );
             }
           });
         });
@@ -128,13 +139,20 @@ export default function Home() {
   useEffect(() => {
     let latestViews: ActiveZoneView[] = [];
 
-    function updateActiveZones(views: ActiveZoneView[]) {
+    function updateActiveZones(
+      views: ActiveZoneView[]
+    ) {
       const now = Date.now();
 
       const ids = Array.from(
         new Set(
           views
-            .filter((view) => view.zoneId && view.expiresAt && view.expiresAt > now)
+            .filter(
+              (view) =>
+                view.zoneId &&
+                view.expiresAt &&
+                view.expiresAt > now
+            )
             .map((view) => String(view.zoneId))
         )
       );
@@ -142,10 +160,17 @@ export default function Home() {
       setActiveZoneIds(ids);
     }
 
-    const unsubscribe = onSnapshot(collection(db, "activeZoneViews"), (snapshot) => {
-      latestViews = snapshot.docs.map((viewDoc) => viewDoc.data() as ActiveZoneView);
-      updateActiveZones(latestViews);
-    });
+    const unsubscribe = onSnapshot(
+      collection(db, "activeZoneViews"),
+      (snapshot) => {
+        latestViews = snapshot.docs.map(
+          (viewDoc) =>
+            viewDoc.data() as ActiveZoneView
+        );
+
+        updateActiveZones(latestViews);
+      }
+    );
 
     const interval = window.setInterval(() => {
       updateActiveZones(latestViews);
@@ -157,22 +182,62 @@ export default function Home() {
     };
   }, []);
 
+  const subRegions = useMemo(() => {
+    if (selectedRegionGroup === "후포지역") {
+      return ["전체", ...HUPO_REGIONS];
+    }
+
+    if (selectedRegionGroup === "영해지역") {
+      return ["전체", ...YEONGHAE_REGIONS];
+    }
+
+    return ["전체"];
+  }, [selectedRegionGroup]);
+
   const filteredZones = useMemo(() => {
     const filtered = zones.filter((zone) => {
       const matchesSearch =
-        zone.name.includes(search) || String(zone.id ?? "").includes(search);
+        zone.name.includes(search) ||
+        String(zone.id ?? "").includes(search);
 
-      const matchesRegion =
-        selectedRegion === "전체" ? true : zone.region === selectedRegion;
+      let matchesRegion = true;
+
+      if (selectedRegionGroup === "후포지역") {
+        matchesRegion =
+          selectedSubRegion === "전체"
+            ? HUPO_REGIONS.includes(zone.region)
+            : zone.region === selectedSubRegion;
+      }
+
+      if (selectedRegionGroup === "영해지역") {
+        matchesRegion =
+          selectedSubRegion === "전체"
+            ? YEONGHAE_REGIONS.includes(zone.region)
+            : zone.region === selectedSubRegion;
+      }
 
       const matchesSort =
-        sortType === "todo" ? !zone.lastVisitedAt?.seconds : true;
+        sortType === "todo"
+          ? !zone.lastVisitedAt?.seconds
+          : true;
 
-      return matchesSearch && matchesRegion && matchesSort;
+      return (
+        matchesSearch &&
+        matchesRegion &&
+        matchesSort
+      );
     });
 
-    return [...filtered].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-  }, [zones, search, selectedRegion, sortType]);
+    return [...filtered].sort(
+      (a, b) => (a.id ?? 0) - (b.id ?? 0)
+    );
+  }, [
+    zones,
+    search,
+    selectedRegionGroup,
+    selectedSubRegion,
+    sortType,
+  ]);
 
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
@@ -183,7 +248,9 @@ export default function Home() {
             className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
           >
             <ClipboardList size={15} />
-            <span className="font-medium">방문기록</span>
+            <span className="font-medium">
+              방문기록
+            </span>
           </Link>
 
           <Link
@@ -191,7 +258,9 @@ export default function Home() {
             className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
           >
             <Shield size={15} />
-            <span className="font-medium">관리자</span>
+            <span className="font-medium">
+              관리자
+            </span>
           </Link>
         </div>
 
@@ -215,7 +284,9 @@ export default function Home() {
             placeholder="구역 이름 또는 번호 검색"
             className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) =>
+              setSearch(e.target.value)
+            }
           />
         </div>
 
@@ -245,20 +316,55 @@ export default function Home() {
           </button>
         </div>
 
-        <Tabs defaultValue="전체" className="mb-3">
+        {/* 상위 지역 탭 */}
+        <Tabs
+          value={selectedRegionGroup}
+          className="mb-2"
+        >
           <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
-            {regions.map((region) => (
-              <TabsTrigger
-                key={region}
-                value={region}
-                onClick={() => setSelectedRegion(region)}
-                className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
-              >
-                {region}
-              </TabsTrigger>
-            ))}
+            {["전체", "후포지역", "영해지역"].map(
+              (regionGroup) => (
+                <TabsTrigger
+                  key={regionGroup}
+                  value={regionGroup}
+                  onClick={() => {
+                    setSelectedRegionGroup(
+                      regionGroup as RegionGroup
+                    );
+
+                    setSelectedSubRegion("전체");
+                  }}
+                  className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                >
+                  {regionGroup}
+                </TabsTrigger>
+              )
+            )}
           </TabsList>
         </Tabs>
+
+        {/* 하위 지역 탭 */}
+        {selectedRegionGroup !== "전체" && (
+          <Tabs
+            value={selectedSubRegion}
+            className="mb-3"
+          >
+            <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
+              {subRegions.map((region) => (
+                <TabsTrigger
+                  key={region}
+                  value={region}
+                  onClick={() =>
+                    setSelectedSubRegion(region)
+                  }
+                  className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
+                >
+                  {region}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
 
         <div className="mb-3 text-xs text-slate-500 sm:text-sm">
           총{" "}
@@ -270,11 +376,20 @@ export default function Home() {
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredZones.map((zone) => {
-            const isVisited = Boolean(zone.lastVisitedAt?.seconds);
-            const isActive = activeZoneIds.includes(zone.firestoreId);
+            const isVisited = Boolean(
+              zone.lastVisitedAt?.seconds
+            );
+
+            const isActive =
+              activeZoneIds.includes(
+                zone.firestoreId
+              );
 
             return (
-              <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
+              <Link
+                href={`/zone/${zone.firestoreId}`}
+                key={zone.firestoreId}
+              >
                 <Card
                   className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
                     isActive
@@ -370,7 +485,8 @@ export default function Home() {
                       >
                         {zone.lastVisitedAt?.seconds
                           ? new Date(
-                              zone.lastVisitedAt.seconds * 1000
+                              zone.lastVisitedAt.seconds *
+                                1000
                             ).toLocaleString("ko-KR", {
                               year: "numeric",
                               month: "2-digit",
