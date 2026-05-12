@@ -258,7 +258,7 @@ export default function ZoneDetailPage() {
   async function handleVisitLog() {
     if (!zone) return;
 
-    const visitorName = prompt("방문자 이름을 입력해주세요.");
+    const visitorName = prompt("인도자의 이름을 입력해주세요.");
 
     if (!visitorName || visitorName.trim() === "") {
       alert("이름을 입력해야 방문완료 처리할 수 있습니다.");
@@ -275,7 +275,7 @@ export default function ZoneDetailPage() {
         createdAt: serverTimestamp(),
       });
 
-      alert(`${visitorName.trim()}님 방문완료 처리되었습니다!`);
+      alert(`${visitorName.trim()}님 이름으로 방문완료 처리되었습니다!`);
 
       const q = query(
         collection(db, "visitLogs"),
