@@ -874,92 +874,94 @@ export default function VisitsPage() {
   return (
     <main className="min-h-screen bg-slate-100 p-3">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          {role === "admin" ? (
-            <Link
-              href="/admin"
-              className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
-            >
-              <ArrowLeft size={16} />
-              관리자 페이지로 돌아가기
-            </Link>
-          ) : (
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
-            >
-              <ArrowLeft size={16} />
-              메인으로 돌아가기
-            </Link>
-          )}
-
-          <button
-            onClick={handleLogout}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
-          >
-            <LogOut size={16} />
-            로그아웃
-          </button>
-        </div>
-
-        <div className="mb-4 rounded-2xl bg-slate-900 p-5 text-white shadow">
-          <div className="flex items-center gap-2 text-slate-300">
-            <ClipboardList size={18} />
-            <p className="text-sm">전자구역 방문 관리</p>
-          </div>
-
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">방문 기록 관리</h1>
-
-              <p className="mt-1 text-sm text-slate-300">
-                총 {visitLogs.length}개 기록 / 현재 {filteredLogs.length}개 표시
-                / {groupedLogs.length}개 구역
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleDownloadWord}
-                disabled={generatingWord || loading}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-              >
-                <FileText size={14} />
-                {generatingWord ? "생성 중..." : "Word 기록 다운로드"}
-              </button>
-
-              {visitLogs.length > 0 && (
-                <button
-                  onClick={handleDeleteAll}
-                  disabled={deletingAll}
-                  className="rounded-xl bg-red-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        <div className="sticky top-0 z-40 -mx-3 mb-3 border-b border-slate-200 bg-slate-100/95 px-3 pb-3 pt-3 shadow-sm backdrop-blur">
+          <div className="mx-auto max-w-5xl">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              {role === "admin" ? (
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
                 >
-                  {deletingAll ? "삭제 중..." : "전체 삭제"}
-                </button>
+                  <ArrowLeft size={16} />
+                  관리자 페이지로 돌아가기
+                </Link>
+              ) : (
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
+                >
+                  <ArrowLeft size={16} />
+                  메인으로 돌아가기
+                </Link>
               )}
-            </div>
-          </div>
-        </div>
 
-        <Tabs defaultValue="전체" className="mb-3">
-          <TabsList className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-2xl bg-slate-200/70 p-2">
-            {regions.map((region) => (
-              <TabsTrigger
-                key={region}
-                value={region}
-                onClick={() => {
-                  setSelectedRegion(region);
-                  setOpenZone(null);
-                }}
-                className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
               >
-                {region}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+                <LogOut size={16} />
+                로그아웃
+              </button>
+            </div>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="mb-3 rounded-2xl bg-slate-900 p-4 text-white shadow">
+              <div className="flex items-center gap-2 text-slate-300">
+                <ClipboardList size={18} />
+                <p className="text-sm">전자구역 방문 관리</p>
+              </div>
+
+              <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold">방문 기록 관리</h1>
+
+                  <p className="mt-1 text-sm text-slate-300">
+                    총 {visitLogs.length}개 기록 / 현재 {filteredLogs.length}개 표시
+                    / {groupedLogs.length}개 구역
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleDownloadWord}
+                    disabled={generatingWord || loading}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    <FileText size={14} />
+                    {generatingWord ? "생성 중..." : "Word 기록 다운로드"}
+                  </button>
+
+                  {visitLogs.length > 0 && (
+                    <button
+                      onClick={handleDeleteAll}
+                      disabled={deletingAll}
+                      className="rounded-xl bg-red-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      {deletingAll ? "삭제 중..." : "전체 삭제"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <Tabs defaultValue="전체" className="mb-3">
+              <TabsList className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-2xl bg-slate-200/70 p-2">
+                {regions.map((region) => (
+                  <TabsTrigger
+                    key={region}
+                    value={region}
+                    onClick={() => {
+                      setSelectedRegion(region);
+                      setOpenZone(null);
+                    }}
+                    className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                  >
+                    {region}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+
+            <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={toggleAllFilteredLogs}
             disabled={filteredLogs.length === 0}
@@ -990,6 +992,8 @@ export default function VisitsPage() {
 
           <div className="rounded-full bg-white px-3 py-1 text-sm text-slate-500 shadow">
             선택 {selectedLogs.length}개
+          </div>
+            </div>
           </div>
         </div>
 

@@ -473,7 +473,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="sticky top-0 z-40 -mx-3 mb-3 border-b border-slate-200 bg-slate-100/95 px-3 pb-3 pt-3 backdrop-blur sm:-mx-4 sm:px-4">
+          <div className="mx-auto max-w-7xl">
+            <div className="flex items-center justify-between gap-2">
           <Link
             href="/visits"
             className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
@@ -604,6 +606,9 @@ export default function Home() {
             {filteredZones.length}
           </span>
           개 구역
+        </div>
+
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
