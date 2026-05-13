@@ -128,6 +128,7 @@ export default function VisitsPage() {
 
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editingDateValue, setEditingDateValue] = useState("");
+  const [editingVisitorName, setEditingVisitorName] = useState("");
   const [updatingDateId, setUpdatingDateId] = useState<string | null>(null);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -274,11 +275,13 @@ export default function VisitsPage() {
   function startEditVisitDate(log: VisitLog) {
     setEditingLogId(log.id);
     setEditingDateValue(toDateTimeLocalValue(log.createdAt));
+    setEditingVisitorName(log.visitorName || "");
   }
 
   function cancelEditVisitDate() {
     setEditingLogId(null);
     setEditingDateValue("");
+    setEditingVisitorName("");
   }
 
   async function handleUpdateVisitDate(log: VisitLog) {
@@ -288,9 +291,15 @@ export default function VisitsPage() {
     }
 
     const nextDate = new Date(editingDateValue);
+    const nextVisitorName = editingVisitorName.trim();
 
     if (Number.isNaN(nextDate.getTime())) {
       alert("올바른 날짜가 아닙니다.");
+      return;
+    }
+
+    if (!nextVisitorName) {
+      alert("방문자 이름을 입력해주세요.");
       return;
     }
 
@@ -316,6 +325,7 @@ export default function VisitsPage() {
 
       await updateDoc(doc(db, "visitLogs", log.id), {
         createdAt: nextTimestamp,
+        visitorName: nextVisitorName,
       });
 
       setVisitLogs((prev) =>
@@ -325,6 +335,7 @@ export default function VisitsPage() {
               ? {
                   ...item,
                   createdAt: nextTimestamp,
+                  visitorName: nextVisitorName,
                 }
               : item
           )
@@ -333,8 +344,9 @@ export default function VisitsPage() {
 
       setEditingLogId(null);
       setEditingDateValue("");
+      setEditingVisitorName("");
 
-      alert("방문완료 날짜가 수정되었습니다.");
+      alert("방문 정보가 수정되었습니다.");
     } catch (error) {
       console.error("방문완료 날짜 수정 에러:", error);
       alert("방문완료 날짜 수정 실패");
@@ -1001,10 +1013,20 @@ export default function VisitsPage() {
                               {isEditing && (
                                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                                   <div className="mb-2 text-xs font-semibold text-slate-600">
-                                    방문완료 날짜 수정
+                                    방문 정보 수정
                                   </div>
 
                                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                    <input
+                                      type="text"
+                                      value={editingVisitorName}
+                                      onChange={(event) =>
+                                        setEditingVisitorName(event.target.value)
+                                      }
+                                      placeholder="방문자 이름"
+                                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                    />
+
                                     <input
                                       type="datetime-local"
                                       value={editingDateValue}
