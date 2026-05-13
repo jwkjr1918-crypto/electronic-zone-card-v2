@@ -1057,17 +1057,12 @@ export default function VisitsPage() {
                     <input
                       type="checkbox"
                       checked={allZoneSelected}
-                      onClick={(event) => {
-                        event.preventDefault();
-
+                      onChange={(event) => {
                         toggleLatestLog(
                           latestLog.id,
-                          event.shiftKey,
-                          !latestSelected,
+                          event.nativeEvent.shiftKey,
+                          event.target.checked,
                         );
-                      }}
-                      onChange={() => {
-                        // 선택은 onClick에서 직접 처리합니다.
                       }}
                       className="h-6 w-6 shrink-0 accent-red-500"
                       aria-label={`${latestLog.zoneName} 최근 방문기록 선택`}
@@ -1149,19 +1144,14 @@ export default function VisitsPage() {
                                     type="checkbox"
                                     checked={checked}
                                     disabled={!isLatestLog}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-
+                                    onChange={(event) => {
                                       if (!isLatestLog) return;
 
                                       toggleLatestLog(
                                         log.id,
-                                        event.shiftKey,
-                                        !checked,
+                                        event.nativeEvent.shiftKey,
+                                        event.target.checked,
                                       );
-                                    }}
-                                    onChange={() => {
-                                      // 선택은 onClick에서 직접 처리합니다.
                                     }}
                                     className="h-6 w-6 shrink-0 accent-red-500 disabled:opacity-30"
                                   />
