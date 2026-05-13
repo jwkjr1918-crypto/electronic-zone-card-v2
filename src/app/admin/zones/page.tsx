@@ -632,41 +632,47 @@ export default function AdminZonesPage() {
   return (
     <main className="min-h-screen bg-slate-100 p-3 pb-28 sm:p-4 sm:pb-28">
       <div className="mx-auto max-w-5xl">
-        <div className="sticky top-0 z-50 -mx-3 mb-3 flex items-center justify-between gap-2 bg-slate-100/95 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4">
-          <Link
-            href="/admin"
-            className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
-          >
-            <ArrowLeft size={17} />
-            관리자 페이지
-          </Link>
+        <div className="sticky top-0 z-50 -mx-3 mb-4 bg-slate-100/95 px-3 pb-3 pt-2 backdrop-blur sm:-mx-4 sm:px-4">
+          <section className="rounded-3xl bg-slate-900 p-4 text-white shadow sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <MapPinned size={18} />
+                  <span className="text-sm">전자구역 관리자</span>
+                </div>
 
-          <button
-            onClick={handleLogout}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow"
-          >
-            <LogOut size={16} />
-            로그아웃
-          </button>
-        </div>
+                <h1 className="mt-2 text-2xl font-bold sm:text-3xl">
+                  구역 관리
+                </h1>
 
-        <section className="mb-4 rounded-3xl bg-slate-900 p-5 text-white shadow sm:p-6">
-          <div className="flex items-center gap-2 text-slate-300">
-            <MapPinned size={18} />
-            <span className="text-sm">전자구역 관리자</span>
-          </div>
+                <p className="mt-1 text-sm text-slate-300">
+                  구역 목록을 확인하고 수정, 삭제, 방문완료 처리할 수 있습니다.
+                </p>
+              </div>
 
-          <h1 className="mt-3 text-2xl font-bold sm:text-3xl">구역 관리</h1>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <Link
+                  href="/admin"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/95 px-3 py-2 text-xs font-bold text-slate-800 shadow transition hover:bg-white sm:text-sm"
+                >
+                  <ArrowLeft size={15} />
+                  관리자
+                </Link>
 
-          <p className="mt-2 text-sm text-slate-300">
-            구역 목록을 확인하고 수정, 삭제, 방문완료 처리할 수 있습니다.
-          </p>
-        </section>
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-red-500 px-3 py-2 text-xs font-bold text-white shadow transition hover:bg-red-600 sm:text-sm"
+                >
+                  <LogOut size={15} />
+                  로그아웃
+                </button>
+              </div>
+            </div>
+          </section>
 
-        <section className="rounded-3xl bg-white p-4 shadow sm:p-5">
-          <div className="sticky top-[64px] z-40 -mx-4 -mt-4 mb-4 rounded-t-3xl border-b border-slate-200 bg-white/95 p-4 backdrop-blur sm:-mx-5 sm:-mt-5 sm:p-5">
+          <section className="mt-3 rounded-3xl border border-slate-200 bg-white p-4 shadow sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <ClipboardList size={19} />
                   <h2 className="text-xl font-bold">구역 목록</h2>
@@ -715,7 +721,7 @@ export default function AdminZonesPage() {
                 </Tabs>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 lg:max-w-[360px] lg:justify-end">
                 <button
                   onClick={toggleAllFilteredZones}
                   disabled={filteredZones.length === 0}
@@ -760,8 +766,10 @@ export default function AdminZonesPage() {
                 </Link>
               </div>
             </div>
-          </div>
+          </section>
+        </div>
 
+        <section className="rounded-3xl bg-white p-4 shadow sm:p-5">
           {loading ? (
             <div className="rounded-2xl bg-slate-50 p-6 text-slate-500">
               불러오는 중...
