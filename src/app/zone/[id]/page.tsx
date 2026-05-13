@@ -114,9 +114,27 @@ function normalizeAddresses(addresses?: string[]) {
   );
 }
 
+function getCountyByRegion(region?: string) {
+  const normalized = String(region ?? "")
+    .trim()
+    .replace(/\s/g, "");
+
+  const uljinRegions = [
+    "후포면",
+    "평해읍",
+    "온정면",
+    "기성면",
+  ];
+
+  return uljinRegions.includes(normalized)
+    ? "울진군"
+    : "영덕군";
+}
+
 function getFullAddress(zone: Zone, address: string) {
-  const region = zone.region ? `경상북도 영덕군 ${zone.region}` : "경상북도 영덕군";
-  return `${region} ${address}`.trim();
+  const county = getCountyByRegion(zone.region);
+
+  return `경상북도 ${county} ${zone.region} ${address}`.trim();
 }
 
 function getNaverMapUrl(zone: Zone, address: string) {
