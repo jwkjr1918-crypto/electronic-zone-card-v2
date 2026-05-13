@@ -120,6 +120,7 @@ function toDateTimeLocalValue(createdAt?: Timestamp | null) {
 
 export default function VisitsPage() {
   const lastSelectedLogIdRef = useRef<string | null>(null);
+  const shiftSelectPressedRef = useRef(false);
 
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1146,15 +1147,22 @@ export default function VisitsPage() {
                                   <input
                                     type="checkbox"
                                     checked={checked}
+                                    onPointerDown={(event) => {
+                                      shiftSelectPressedRef.current =
+                                        event.shiftKey;
+                                    }}
+                                    onClick={(event) => {
+                                      shiftSelectPressedRef.current =
+                                        event.shiftKey;
+                                    }}
                                     onChange={(event) => {
-                                      const nativeEvent =
-                                        event.nativeEvent as MouseEvent;
-
                                       toggleLog(
                                         log.id,
-                                        nativeEvent.shiftKey,
+                                        shiftSelectPressedRef.current,
                                         event.target.checked,
                                       );
+
+                                      shiftSelectPressedRef.current = false;
                                     }}
                                     className="h-6 w-6 shrink-0 accent-red-500"
                                   />
