@@ -702,22 +702,24 @@ export default function AdminZonesPage() {
                 )}
 
                 <Tabs defaultValue="전체" className="mt-4">
-                  <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
-                    {regions.map((region) => (
-                      <TabsTrigger
-                        key={region}
-                        value={region}
-                        onClick={() => {
-                          setSelectedRegion(region);
-                          setSelectedZones([]);
-                          setLastSelectedZoneId(null);
-                        }}
-                        className="shrink-0 rounded-xl px-4 text-sm font-semibold"
-                      >
-                        {region}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
+                  <div className="overflow-x-auto pb-1">
+                    <TabsList className="flex h-12 min-w-max gap-1 rounded-2xl bg-slate-100 p-1">
+                      {regions.map((region) => (
+                        <TabsTrigger
+                          key={region}
+                          value={region}
+                          onClick={() => {
+                            setSelectedRegion(region);
+                            setSelectedZones([]);
+                            setLastSelectedZoneId(null);
+                          }}
+                          className="shrink-0 rounded-xl px-4 text-sm font-semibold"
+                        >
+                          {region}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </div>
                 </Tabs>
               </div>
 
