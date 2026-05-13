@@ -116,32 +116,73 @@ function normalizeAddressText(text: string) {
 function extractAddressesFromText(text: string) {
   const normalizedText = normalizeAddressText(text);
 
-  const patterns = [
-    /[가-힣0-9]{1,12}(?:대로|번길|길|로)\s*\d{1,4}(?:\s*-\s*\d{1,4})?/g,
-    /[가-힣0-9]{1,12}(?:리|동)\s*\d{1,4}(?:\s*-\s*\d{1,4})?/g,
-  ];
+  const compactText = normalizedText.replace(/\s+/g, "");
 
   const found: string[] = [];
 
-  patterns.forEach((pattern) => {
+  function addAddress(address: string) {
+    const cleaned = address
+      .replace(/\s*-\s*/g, "-")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (
+      cleaned.length >= 4 &&
+      /\d/.test(cleaned) &&
+      !/^\d/.test(cleaned) &&
+      !found.includes(cleaned)
+    ) {
+      found.push(cleaned);
+    }
+  }
+
+  const normalPatterns = [
+    /[가-힣0-9]{1,12}(?:대로|번길|길|로)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
+    /[가-힣0-9]{1,12}(?:리|동)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
+  ];
+
+  normalPatterns.forEach((pattern) => {
     const matches = normalizedText.match(pattern) || [];
+    matches.forEach(addAddress);
+  });
+
+  const compactPatterns = [
+    /[가-힣0-9]{1,12}(?:대로|번길|길|로)\d{1,5}(?:-\d{1,5})?/g,
+    /[가-힣0-9]{1,12}(?:리|동)\d{1,5}(?:-\d{1,5})?/g,
+  ];
+
+  compactPatterns.forEach((pattern) => {
+    const matches = compactText.match(pattern) || [];
 
     matches.forEach((match) => {
-      const address = match
-        .replace(/\s*-\s*/g, "-")
-        .replace(/\s+/g, " ")
-        .trim();
+      const formatted = match.replace(
+        /^([가-힣0-9]+(?:대로|번길|길|로|리|동))(\d.*)$/,
+        "$1 $2"
+      );
 
-      if (
-        address.length >= 4 &&
-        /\d/.test(address) &&
-        !/^\d/.test(address) &&
-        !found.includes(address)
-      ) {
-        found.push(address);
-      }
+      addAddress(formatted);
     });
   });
+
+  const lines = normalizedText
+    .split(/\n|\.|,|\//)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const roadLine = lines[index].replace(/\s+/g, "");
+    const numberLine = lines[index + 1].replace(/\s+/g, "");
+
+    if (
+      /[가-힣0-9]{1,12}(?:대로|번길|길|로)$/.test(roadLine) &&
+      /^\d{1,5}(-\d{1,5})?$/.test(numberLine)
+    ) {
+      addAddress(`${roadLine} ${numberLine}`);
+    }
+  }
+
+  console.log("OCR 원문:", text);
+  console.log("주소 추출 결과:", found);
 
   return found;
 }
