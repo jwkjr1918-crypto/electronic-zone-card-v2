@@ -120,6 +120,7 @@ function toDateTimeLocalValue(createdAt?: Timestamp | null) {
 
 export default function VisitsPage() {
   const lastSelectedLogIdRef = useRef<string | null>(null);
+  const shiftPressedRef = useRef(false);
 
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,6 +142,28 @@ export default function VisitsPage() {
   const [selectedRegion, setSelectedRegion] = useState("전체");
 
   const router = useRouter();
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Shift") {
+        shiftPressedRef.current = true;
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.key === "Shift") {
+        shiftPressedRef.current = false;
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -1060,7 +1083,7 @@ export default function VisitsPage() {
                       onChange={(event) => {
                         toggleLatestLog(
                           latestLog.id,
-                          event.nativeEvent.shiftKey,
+                          shiftPressedRef.current,
                           event.target.checked,
                         );
                       }}
@@ -1149,7 +1172,7 @@ export default function VisitsPage() {
 
                                       toggleLatestLog(
                                         log.id,
-                                        event.nativeEvent.shiftKey,
+                                        shiftPressedRef.current,
                                         event.target.checked,
                                       );
                                     }}
