@@ -40,7 +40,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const regions = [
   "전체",
   "후포면",
-  "평해면",
+  "평해읍",
   "온정면",
   "기성면",
   "영해면",
@@ -52,6 +52,7 @@ const regions = [
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const TOTAL_ZONE_COUNT = 484;
 const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
+const VALID_VISIT_INTERVAL_MONTHS = 3;
 
 interface VisitLog {
   id: string;
@@ -61,6 +62,16 @@ interface VisitLog {
   region: string;
   visitorName?: string;
   createdAt?: Timestamp | null;
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function isAtLeastMonthsAfter(target: Date, base: Date, months: number) {
+  return target.getTime() >= addMonths(base, months).getTime();
 }
 
 export default function VisitsPage() {
@@ -379,19 +390,83 @@ export default function VisitsPage() {
     return paragraph;
   }
 
-  function setCellText(xmlDoc: XMLDocument, cell: Element | undefined, text: string) {
+  function clearCell(cell: Element | undefined) {
     if (!cell) return;
 
-    Array.from(cell.getElementsByTagNameNS(WORD_NS, "p")).forEach((paragraph) => {
-      if (paragraph.parentNode === cell) {
-        cell.removeChild(paragraph);
+    Array.from(cell.getElementsByTagNameNS(WORD_NS, "p")).forEach(
+      (paragraph) => {
+        if (paragraph.parentNode === cell) {
+          cell.removeChild(paragraph);
+        }
       }
-    });
+    );
+  }
 
+  function setCellText(
+    xmlDoc: XMLDocument,
+    cell: Element | undefined,
+    text: string
+  ) {
+    if (!cell) return;
+
+    clearCell(cell);
     cell.appendChild(createTextParagraph(xmlDoc, text));
   }
 
-  function getLogsByZoneNumber() {
+  function setCellLines(
+    xmlDoc: XMLDocument,
+    cell: Element | undefined,
+    lines: string[]
+  ) {
+    if (!cell) return;
+
+    clearCell(cell);
+
+    if (lines.length === 0) {
+      cell.appendChild(createTextParagraph(xmlDoc, ""));
+      return;
+    }
+
+    lines.forEach((line) => {
+      cell.appendChild(createTextParagraph(xmlDoc, line));
+    });
+  }
+
+  function getValidThreeMonthLogs(logs: VisitLog[]) {
+    const sortedLogs = [...logs]
+      .filter((log) => Boolean(log.createdAt?.seconds))
+      .sort((a, b) => {
+        const aTime = a.createdAt?.seconds ?? 0;
+        const bTime = b.createdAt?.seconds ?? 0;
+
+        return aTime - bTime;
+      });
+
+    const validLogs: VisitLog[] = [];
+    let lastValidDate: Date | null = null;
+
+    sortedLogs.forEach((log) => {
+      if (!log.createdAt?.seconds) return;
+
+      const currentDate = new Date(log.createdAt.seconds * 1000);
+
+      if (
+        !lastValidDate ||
+        isAtLeastMonthsAfter(
+          currentDate,
+          lastValidDate,
+          VALID_VISIT_INTERVAL_MONTHS
+        )
+      ) {
+        validLogs.push(log);
+        lastValidDate = currentDate;
+      }
+    });
+
+    return validLogs;
+  }
+
+  function getValidLogsByZoneNumber() {
     const map = new Map<number, VisitLog[]>();
 
     visitLogs.forEach((log) => {
@@ -404,16 +479,13 @@ export default function VisitsPage() {
       map.get(log.zoneNumber)?.push(log);
     });
 
-    map.forEach((logs) => {
-      logs.sort((a, b) => {
-        const aTime = a.createdAt?.seconds ?? 0;
-        const bTime = b.createdAt?.seconds ?? 0;
+    const validMap = new Map<number, VisitLog[]>();
 
-        return aTime - bTime;
-      });
+    map.forEach((logs, zoneNumber) => {
+      validMap.set(zoneNumber, getValidThreeMonthLogs(logs));
     });
 
-    return map;
+    return validMap;
   }
 
   async function handleDownloadWord() {
@@ -471,7 +543,7 @@ export default function VisitsPage() {
         recordTable.removeChild(row);
       });
 
-      const logsByZoneNumber = getLogsByZoneNumber();
+      const validLogsByZoneNumber = getValidLogsByZoneNumber();
 
       for (let zoneNumber = 1; zoneNumber <= TOTAL_ZONE_COUNT; zoneNumber += 1) {
         const firstRow = firstDataRowTemplate.cloneNode(true) as Element;
@@ -480,15 +552,18 @@ export default function VisitsPage() {
         const firstRowCells = getTextCells(firstRow);
         const secondRowCells = getTextCells(secondRow);
 
-        const zoneLogs = logsByZoneNumber.get(zoneNumber) || [];
-        const latestLog = zoneLogs[zoneLogs.length - 1];
+        const zoneLogs = validLogsByZoneNumber.get(zoneNumber) || [];
+
+        const dates = zoneLogs.map((log) => formatWordDate(log.createdAt));
+        const visitorNames = zoneLogs.map((log) => log.visitorName || "");
 
         setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
-        setCellText(xmlDoc, firstRowCells[1], formatWordDate(latestLog?.createdAt));
 
-        setCellText(xmlDoc, firstRowCells[2], latestLog?.visitorName || "");
-        setCellText(xmlDoc, secondRowCells[2], formatWordDate(latestLog?.createdAt));
-        setCellText(xmlDoc, secondRowCells[3], formatWordDate(latestLog?.createdAt));
+        setCellLines(xmlDoc, firstRowCells[1], dates);
+        setCellLines(xmlDoc, firstRowCells[2], visitorNames);
+
+        setCellLines(xmlDoc, secondRowCells[2], dates);
+        setCellLines(xmlDoc, secondRowCells[3], dates);
 
         for (let index = 3; index < firstRowCells.length; index += 1) {
           setCellText(xmlDoc, firstRowCells[index], "");

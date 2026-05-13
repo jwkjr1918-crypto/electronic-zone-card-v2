@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   X,
   RotateCw,
+  Lock,
 } from "lucide-react";
 
 import { db, auth } from "@/firebase/firebase";
@@ -54,6 +55,7 @@ interface VisitLog {
 
 const ACTIVE_VIEW_EXPIRE_MS = 120000;
 const ACTIVE_VIEW_HEARTBEAT_MS = 30000;
+const VISIT_LOCK_MONTHS = 3;
 
 function getSessionViewId(zoneId: string) {
   const key = "activeZoneViewSessionId";
@@ -73,6 +75,30 @@ function getSessionViewId(zoneId: string) {
   return `${zoneId}_${next}`;
 }
 
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function formatDateTime(date: Date) {
+  return date.toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
 export default function ZoneDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -84,6 +110,7 @@ export default function ZoneDetailPage() {
   const [loading, setLoading] = useState(true);
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
+  const [savingVisit, setSavingVisit] = useState(false);
 
   const fromEvangelist = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -93,6 +120,34 @@ export default function ZoneDetailPage() {
       sessionStorage.getItem("zoneEntryFrom") === "evangelist"
     );
   }, [searchParams]);
+
+  const visitLockInfo = useMemo(() => {
+    if (!recentVisit?.createdAt?.seconds) {
+      return {
+        locked: false,
+        nextAvailableDate: null as Date | null,
+        remainingDays: 0,
+      };
+    }
+
+    const latestDate = new Date(recentVisit.createdAt.seconds * 1000);
+    const nextAvailableDate = addMonths(latestDate, VISIT_LOCK_MONTHS);
+    const now = new Date();
+    const locked = now < nextAvailableDate;
+
+    const remainingDays = locked
+      ? Math.ceil(
+          (nextAvailableDate.getTime() - now.getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
+      : 0;
+
+    return {
+      locked,
+      nextAvailableDate,
+      remainingDays,
+    };
+  }, [recentVisit]);
 
   useEffect(() => {
     async function fetchZone() {
@@ -212,7 +267,7 @@ export default function ZoneDetailPage() {
       try {
         navigator.sendBeacon?.(url);
       } catch {
-        // sendBeacon은 보조 수단입니다. 실제 정리는 expiresAt으로 처리됩니다.
+        // expiresAt으로 자동 만료 처리됩니다.
       }
     };
 
@@ -255,8 +310,37 @@ export default function ZoneDetailPage() {
     setImageOpen(false);
   }
 
+  async function refreshRecentVisit() {
+    const q = query(
+      collection(db, "visitLogs"),
+      where("zoneId", "==", id),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const querySnapshot = await getDocs(q);
+
+    const visits = querySnapshot.docs.map((visitDoc) => ({
+      id: visitDoc.id,
+      ...visitDoc.data(),
+    })) as VisitLog[];
+
+    if (visits.length > 0) {
+      setRecentVisit(visits[0]);
+    }
+  }
+
   async function handleVisitLog() {
-    if (!zone) return;
+    if (!zone || savingVisit) return;
+
+    if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
+      alert(
+        `최근 방문완료 후 ${VISIT_LOCK_MONTHS}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
+          visitLockInfo.nextAvailableDate
+        )}`
+      );
+      return;
+    }
 
     const visitorName = prompt("인도자의 이름을 입력해주세요.");
 
@@ -266,6 +350,8 @@ export default function ZoneDetailPage() {
     }
 
     try {
+      setSavingVisit(true);
+
       await addDoc(collection(db, "visitLogs"), {
         zoneId: id,
         zoneName: zone.name,
@@ -277,23 +363,7 @@ export default function ZoneDetailPage() {
 
       alert(`${visitorName.trim()}님 이름으로 방문완료 처리되었습니다!`);
 
-      const q = query(
-        collection(db, "visitLogs"),
-        where("zoneId", "==", id),
-        orderBy("createdAt", "desc"),
-        limit(1)
-      );
-
-      const querySnapshot = await getDocs(q);
-
-      const visits = querySnapshot.docs.map((visitDoc) => ({
-        id: visitDoc.id,
-        ...visitDoc.data(),
-      })) as VisitLog[];
-
-      if (visits.length > 0) {
-        setRecentVisit(visits[0]);
-      }
+      await refreshRecentVisit();
 
       if (fromEvangelist) {
         sessionStorage.removeItem("zoneEntryFrom");
@@ -302,6 +372,8 @@ export default function ZoneDetailPage() {
     } catch (error) {
       console.error("방문 기록 저장 에러:", error);
       alert("저장 실패");
+    } finally {
+      setSavingVisit(false);
     }
   }
 
@@ -376,12 +448,44 @@ export default function ZoneDetailPage() {
                 <span>{zone.region}</span>
               </div>
 
+              {visitLockInfo.locked && visitLockInfo.nextAvailableDate && (
+                <div className="mt-5 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
+                  <div className="flex items-center gap-2 font-bold">
+                    <Lock size={16} />
+                    3개월 미만 재완료 제한
+                  </div>
+                  <p className="mt-1">
+                    다음 완료 가능일:{" "}
+                    <span className="font-bold">
+                      {formatDate(visitLockInfo.nextAvailableDate)}
+                    </span>
+                    {visitLockInfo.remainingDays > 0
+                      ? ` (${visitLockInfo.remainingDays}일 남음)`
+                      : ""}
+                  </p>
+                </div>
+              )}
+
               <button
                 onClick={handleVisitLog}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-slate-900 transition hover:bg-slate-200"
+                disabled={visitLockInfo.locked || savingVisit}
+                className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold transition disabled:cursor-not-allowed ${
+                  visitLockInfo.locked
+                    ? "bg-slate-500 text-slate-200"
+                    : "bg-white text-slate-900 hover:bg-slate-200"
+                }`}
               >
-                <CheckCircle2 size={20} />
-                구역완료
+                {visitLockInfo.locked ? (
+                  <>
+                    <Lock size={20} />
+                    3개월 이후 완료 가능
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={20} />
+                    {savingVisit ? "저장 중..." : "구역완료"}
+                  </>
+                )}
               </button>
             </div>
           </section>
@@ -406,9 +510,9 @@ export default function ZoneDetailPage() {
 
                 <p className="mt-1 text-sm text-slate-500">
                   {recentVisit.createdAt?.seconds
-                    ? new Date(
-                        recentVisit.createdAt.seconds * 1000
-                      ).toLocaleString()
+                    ? formatDateTime(
+                        new Date(recentVisit.createdAt.seconds * 1000)
+                      )
                     : "시간 정보 없음"}
                 </p>
               </div>
