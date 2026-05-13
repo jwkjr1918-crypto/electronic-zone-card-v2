@@ -33,6 +33,12 @@ const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
 
 const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
 
+const THREE_MONTHS_AGO = () => {
+  const date = new Date();
+  date.setMonth(date.getMonth() - 3);
+  return date;
+};
+
 type RegionGroup = "전체" | "후포지역" | "영해지역";
 
 type SortType = "todo" | "number" | "oldest";
@@ -57,6 +63,87 @@ interface ActiveZoneView {
   expiresAt?: number;
 }
 
+function getZoneNumber(zone: Zone) {
+  return typeof zone.id === "number" ? zone.id : Number.MAX_SAFE_INTEGER;
+}
+
+function getVisitedSeconds(zone: Zone) {
+  return zone.lastVisitedAt?.seconds ?? null;
+}
+
+function hasVisitRecord(zone: Zone) {
+  return Boolean(zone.lastVisitedAt?.seconds);
+}
+
+function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return false;
+
+  return seconds * 1000 <= cutoffDate.getTime();
+}
+
+function sortByZoneNumber(a: Zone, b: Zone) {
+  const numberDiff = getZoneNumber(a) - getZoneNumber(b);
+
+  if (numberDiff !== 0) return numberDiff;
+
+  return a.name.localeCompare(b.name, "ko");
+}
+
+function sortOldestZones(a: Zone, b: Zone) {
+  const aVisited = hasVisitRecord(a);
+  const bVisited = hasVisitRecord(b);
+
+  if (!aVisited && !bVisited) {
+    return sortByZoneNumber(a, b);
+  }
+
+  if (!aVisited) return -1;
+  if (!bVisited) return 1;
+
+  const visitedDiff =
+    (a.lastVisitedAt?.seconds ?? 0) - (b.lastVisitedAt?.seconds ?? 0);
+
+  if (visitedDiff !== 0) return visitedDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
+function sortTodoZones(zones: Zone[]) {
+  const cutoffDate = THREE_MONTHS_AGO();
+
+  const todoZones = zones.filter(
+    (zone) => !hasVisitRecord(zone) || isThreeMonthsPassed(zone, cutoffDate)
+  );
+
+  const hasUnvisitedZone = zones.some((zone) => !hasVisitRecord(zone));
+
+  if (hasUnvisitedZone) {
+    return [...todoZones].sort(sortByZoneNumber);
+  }
+
+  const oldestZone = [...todoZones].sort(sortOldestZones)[0];
+
+  if (!oldestZone || typeof oldestZone.id !== "number") {
+    return [...todoZones].sort(sortByZoneNumber);
+  }
+
+  const startNumber = oldestZone.id;
+
+  return [...todoZones].sort((a, b) => {
+    const aNumber = getZoneNumber(a);
+    const bNumber = getZoneNumber(b);
+
+    const aGroup = aNumber >= startNumber ? 0 : 1;
+    const bGroup = bNumber >= startNumber ? 0 : 1;
+
+    if (aGroup !== bGroup) return aGroup - bGroup;
+
+    return sortByZoneNumber(a, b);
+  });
+}
+
 export default function Home() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
@@ -65,18 +152,14 @@ export default function Home() {
   const [selectedRegionGroup, setSelectedRegionGroup] =
     useState<RegionGroup>("전체");
 
-  const [selectedSubRegion, setSelectedSubRegion] =
-    useState("전체");
+  const [selectedSubRegion, setSelectedSubRegion] = useState("전체");
 
-  const [sortType, setSortType] =
-    useState<SortType>("todo");
+  const [sortType, setSortType] = useState<SortType>("todo");
 
   useEffect(() => {
     async function fetchZones() {
       try {
-        const querySnapshot = await getDocs(
-          collection(db, "zones")
-        );
+        const querySnapshot = await getDocs(collection(db, "zones"));
 
         const zoneData = querySnapshot.docs.map((zoneDoc) => ({
           firestoreId: zoneDoc.id,
@@ -90,28 +173,20 @@ export default function Home() {
 
         const visitSnapshot = await getDocs(visitQuery);
 
-        const latestVisitMap = new Map<
-          string,
-          Timestamp | null
-        >();
+        const latestVisitMap = new Map<string, Timestamp | null>();
 
         visitSnapshot.docs.forEach((visitDoc) => {
           const log = visitDoc.data() as VisitLogData;
 
           const keys = [
             log.zoneId ? String(log.zoneId) : null,
-            log.zoneNumber
-              ? String(log.zoneNumber)
-              : null,
+            log.zoneNumber ? String(log.zoneNumber) : null,
             log.zoneName ? String(log.zoneName) : null,
           ].filter(Boolean) as string[];
 
           keys.forEach((key) => {
             if (!latestVisitMap.has(key)) {
-              latestVisitMap.set(
-                key,
-                log.createdAt || null
-              );
+              latestVisitMap.set(key, log.createdAt || null);
             }
           });
         });
@@ -141,19 +216,14 @@ export default function Home() {
   useEffect(() => {
     let latestViews: ActiveZoneView[] = [];
 
-    function updateActiveZones(
-      views: ActiveZoneView[]
-    ) {
+    function updateActiveZones(views: ActiveZoneView[]) {
       const now = Date.now();
 
       const ids = Array.from(
         new Set(
           views
             .filter(
-              (view) =>
-                view.zoneId &&
-                view.expiresAt &&
-                view.expiresAt > now
+              (view) => view.zoneId && view.expiresAt && view.expiresAt > now
             )
             .map((view) => String(view.zoneId))
         )
@@ -166,8 +236,7 @@ export default function Home() {
       collection(db, "activeZoneViews"),
       (snapshot) => {
         latestViews = snapshot.docs.map(
-          (viewDoc) =>
-            viewDoc.data() as ActiveZoneView
+          (viewDoc) => viewDoc.data() as ActiveZoneView
         );
 
         updateActiveZones(latestViews);
@@ -190,18 +259,14 @@ export default function Home() {
     zones.forEach((zone) => {
       if (typeof zone.id !== "number") return;
 
-      countMap.set(
-        zone.id,
-        (countMap.get(zone.id) || 0) + 1
-      );
+      countMap.set(zone.id, (countMap.get(zone.id) || 0) + 1);
     });
 
     return new Set(
       zones
         .filter(
           (zone) =>
-            typeof zone.id === "number" &&
-            (countMap.get(zone.id) || 0) > 1
+            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1
         )
         .map((zone) => zone.firestoreId)
     );
@@ -222,10 +287,9 @@ export default function Home() {
   }, [selectedRegionGroup]);
 
   const filteredZones = useMemo(() => {
-    const filtered = zones.filter((zone) => {
+    const baseFilteredZones = zones.filter((zone) => {
       const matchesSearch =
-        zone.name.includes(search) ||
-        String(zone.id ?? "").includes(search);
+        zone.name.includes(search) || String(zone.id ?? "").includes(search);
 
       let matchesRegion = true;
 
@@ -243,45 +307,19 @@ export default function Home() {
             : zone.region === selectedSubRegion;
       }
 
-      const matchesSort =
-        sortType === "todo"
-          ? !zone.lastVisitedAt?.seconds
-          : true;
-
-      return (
-        matchesSearch &&
-        matchesRegion &&
-        matchesSort
-      );
+      return matchesSearch && matchesRegion;
     });
 
-    return [...filtered].sort((a, b) => {
-      if (sortType === "oldest") {
-        const aVisited = Boolean(a.lastVisitedAt?.seconds);
-        const bVisited = Boolean(b.lastVisitedAt?.seconds);
+    if (sortType === "todo") {
+      return sortTodoZones(baseFilteredZones);
+    }
 
-        if (!aVisited && !bVisited) {
-          return (a.id ?? 0) - (b.id ?? 0);
-        }
+    if (sortType === "oldest") {
+      return [...baseFilteredZones].sort(sortOldestZones);
+    }
 
-        if (!aVisited) return -1;
-        if (!bVisited) return 1;
-
-        return (
-          (a.lastVisitedAt?.seconds ?? 0) -
-          (b.lastVisitedAt?.seconds ?? 0)
-        );
-      }
-
-      return (a.id ?? 0) - (b.id ?? 0);
-    });
-  }, [
-    zones,
-    search,
-    selectedRegionGroup,
-    selectedSubRegion,
-    sortType,
-  ]);
+    return [...baseFilteredZones].sort(sortByZoneNumber);
+  }, [zones, search, selectedRegionGroup, selectedSubRegion, sortType]);
 
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
@@ -292,9 +330,7 @@ export default function Home() {
             className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
           >
             <ClipboardList size={15} />
-            <span className="font-medium">
-              방문기록
-            </span>
+            <span className="font-medium">방문기록</span>
           </Link>
 
           <Link
@@ -302,9 +338,7 @@ export default function Home() {
             className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
           >
             <Shield size={15} />
-            <span className="font-medium">
-              관리자
-            </span>
+            <span className="font-medium">관리자</span>
           </Link>
         </div>
 
@@ -337,9 +371,7 @@ export default function Home() {
             placeholder="구역 이름 또는 번호 검색"
             className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
             value={search}
-            onChange={(e) =>
-              setSearch(e.target.value)
-            }
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
@@ -382,45 +414,32 @@ export default function Home() {
           </button>
         </div>
 
-        <Tabs
-          value={selectedRegionGroup}
-          className="mb-2"
-        >
+        <Tabs value={selectedRegionGroup} className="mb-2">
           <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
-            {["전체", "후포지역", "영해지역"].map(
-              (regionGroup) => (
-                <TabsTrigger
-                  key={regionGroup}
-                  value={regionGroup}
-                  onClick={() => {
-                    setSelectedRegionGroup(
-                      regionGroup as RegionGroup
-                    );
-
-                    setSelectedSubRegion("전체");
-                  }}
-                  className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
-                >
-                  {regionGroup}
-                </TabsTrigger>
-              )
-            )}
+            {["전체", "후포지역", "영해지역"].map((regionGroup) => (
+              <TabsTrigger
+                key={regionGroup}
+                value={regionGroup}
+                onClick={() => {
+                  setSelectedRegionGroup(regionGroup as RegionGroup);
+                  setSelectedSubRegion("전체");
+                }}
+                className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+              >
+                {regionGroup}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
 
         {selectedRegionGroup !== "전체" && (
-          <Tabs
-            value={selectedSubRegion}
-            className="mb-3"
-          >
+          <Tabs value={selectedSubRegion} className="mb-3">
             <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
               {subRegions.map((region) => (
                 <TabsTrigger
                   key={region}
                   value={region}
-                  onClick={() =>
-                    setSelectedSubRegion(region)
-                  }
+                  onClick={() => setSelectedSubRegion(region)}
                   className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
                 >
                   {region}
@@ -440,25 +459,14 @@ export default function Home() {
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredZones.map((zone) => {
-            const isVisited = Boolean(
-              zone.lastVisitedAt?.seconds
-            );
+            const isVisited = Boolean(zone.lastVisitedAt?.seconds);
 
-            const isActive =
-              activeZoneIds.includes(
-                zone.firestoreId
-              );
+            const isActive = activeZoneIds.includes(zone.firestoreId);
 
-            const isDuplicate =
-              duplicateZoneIds.has(
-                zone.firestoreId
-              );
+            const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
 
             return (
-              <Link
-                href={`/zone/${zone.firestoreId}`}
-                key={zone.firestoreId}
-              >
+              <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
                 <Card
                   className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
                     isDuplicate
@@ -573,8 +581,7 @@ export default function Home() {
                       >
                         {zone.lastVisitedAt?.seconds
                           ? new Date(
-                              zone.lastVisitedAt.seconds *
-                                1000
+                              zone.lastVisitedAt.seconds * 1000
                             ).toLocaleString("ko-KR", {
                               year: "numeric",
                               month: "2-digit",
