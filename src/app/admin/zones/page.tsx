@@ -1,5 +1,6 @@
 "use client";
 
+import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -74,6 +75,10 @@ export default function AdminZonesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
+  const [lastSelectedZoneId, setLastSelectedZoneId] = useState<string | null>(
+    null
+  );
+
   const [bulkCompleting, setBulkCompleting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkUpdatingNumbers, setBulkUpdatingNumbers] = useState(false);
@@ -227,12 +232,46 @@ export default function AdminZonesPage() {
     });
   }
 
-  function toggleZone(zoneId: string) {
+  function handleZoneSelect(zoneId: string, shiftKey: boolean) {
+    if (shiftKey && lastSelectedZoneId) {
+      const lastIndex = filteredZones.findIndex(
+        (zone) => zone.firestoreId === lastSelectedZoneId
+      );
+
+      const currentIndex = filteredZones.findIndex(
+        (zone) => zone.firestoreId === zoneId
+      );
+
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+
+        const rangeIds = filteredZones
+          .slice(start, end + 1)
+          .map((zone) => zone.firestoreId);
+
+        setSelectedZones((prev) => {
+          const next = new Set(prev);
+
+          rangeIds.forEach((id) => {
+            next.add(id);
+          });
+
+          return Array.from(next);
+        });
+
+        setLastSelectedZoneId(zoneId);
+        return;
+      }
+    }
+
     setSelectedZones((prev) =>
       prev.includes(zoneId)
         ? prev.filter((id) => id !== zoneId)
         : [...prev, zoneId]
     );
+
+    setLastSelectedZoneId(zoneId);
   }
 
   function toggleAllFilteredZones() {
@@ -242,6 +281,7 @@ export default function AdminZonesPage() {
           (id) => !filteredZones.some((zone) => zone.firestoreId === id)
         )
       );
+      setLastSelectedZoneId(null);
     } else {
       setSelectedZones((prev) => {
         const next = new Set(prev);
@@ -252,6 +292,8 @@ export default function AdminZonesPage() {
 
         return Array.from(next);
       });
+
+      setLastSelectedZoneId(filteredZones[filteredZones.length - 1]?.firestoreId ?? null);
     }
   }
 
@@ -301,6 +343,7 @@ export default function AdminZonesPage() {
 
       alert("방문완료 처리되었습니다.");
       setSelectedZones([]);
+      setLastSelectedZoneId(null);
     } catch (error) {
       console.error("다중 방문완료 에러:", error);
       alert("처리 실패");
@@ -321,8 +364,7 @@ export default function AdminZonesPage() {
 
     if (!input) return;
 
-    const trimmedInput = input.trim();
-    const changeValue = Number(trimmedInput);
+    const changeValue = Number(input.trim());
 
     if (!Number.isInteger(changeValue)) {
       alert("정수만 입력해주세요. 예: +3, -2, 10");
@@ -395,6 +437,7 @@ export default function AdminZonesPage() {
 
       alert("구역 번호가 변경되었습니다.");
       setSelectedZones([]);
+      setLastSelectedZoneId(null);
     } catch (error) {
       console.error("구역번호 일괄 변경 에러:", error);
       alert("구역번호 변경 실패");
@@ -431,6 +474,7 @@ export default function AdminZonesPage() {
       );
 
       setSelectedZones([]);
+      setLastSelectedZoneId(null);
 
       alert("선택한 구역이 삭제되었습니다.");
     } catch (error) {
@@ -458,6 +502,10 @@ export default function AdminZonesPage() {
       setSelectedZones((prev) =>
         prev.filter((id) => id !== zone.firestoreId)
       );
+
+      if (lastSelectedZoneId === zone.firestoreId) {
+        setLastSelectedZoneId(null);
+      }
     } catch (error) {
       console.error("구역 삭제 에러:", error);
       alert("삭제 실패");
@@ -541,6 +589,7 @@ export default function AdminZonesPage() {
                       onClick={() => {
                         setSelectedRegion(region);
                         setSelectedZones([]);
+                        setLastSelectedZoneId(null);
                       }}
                       className="shrink-0 rounded-xl px-4 text-sm font-semibold"
                     >
@@ -614,18 +663,33 @@ export default function AdminZonesPage() {
                   <div
                     key={zone.firestoreId}
                     id={`zone-${zone.firestoreId}`}
-                    className={`flex items-center justify-between gap-2 rounded-2xl px-3 py-2.5 transition sm:gap-3 sm:px-4 ${
+                    role="button"
+                    tabIndex={0}
+                    onClick={(event: MouseEvent<HTMLDivElement>) => {
+                      handleZoneSelect(zone.firestoreId, event.shiftKey);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleZoneSelect(zone.firestoreId, event.shiftKey);
+                      }
+                    }}
+                    className={`flex cursor-pointer items-center justify-between gap-2 rounded-2xl px-3 py-2.5 transition sm:gap-3 sm:px-4 ${
                       checked
                         ? "bg-emerald-50 ring-2 ring-emerald-200"
-                        : "bg-slate-50"
+                        : "bg-slate-50 hover:bg-slate-100"
                     }`}
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-3">
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleZone(zone.firestoreId)}
-                        className="h-5 w-5 shrink-0 accent-emerald-600"
+                        readOnly
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleZoneSelect(zone.firestoreId, event.shiftKey);
+                        }}
+                        className="h-5 w-5 shrink-0 cursor-pointer accent-emerald-600"
                       />
 
                       <div className="min-w-0 flex-1">
@@ -656,7 +720,10 @@ export default function AdminZonesPage() {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 gap-1.5">
+                    <div
+                      className="flex shrink-0 gap-1.5"
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       <Link
                         href={`/admin/zones/${zone.firestoreId}`}
                         scroll={false}
@@ -694,7 +761,7 @@ export default function AdminZonesPage() {
                 선택 {selectedZones.length}개
               </div>
               <div className="truncate text-xs text-slate-500">
-                선택한 구역의 번호를 +3, -2 방식으로 일괄 변경할 수 있습니다.
+                Shift + 클릭으로 범위 선택할 수 있습니다.
               </div>
             </div>
 
