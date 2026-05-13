@@ -34,9 +34,18 @@ const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
 const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
 
 function normalizeRegion(region?: string) {
-  const normalized = String(region ?? "").trim().replace(/\s/g, "");
+  const normalized = String(region ?? "")
+    .trim()
+    .replace(/\s/g, "");
 
-  if (normalized === "평해") return "평해읍";
+  if (normalized.includes("후포")) return "후포면";
+  if (normalized.includes("평해")) return "평해읍";
+  if (normalized.includes("온정")) return "온정면";
+  if (normalized.includes("기성")) return "기성면";
+  if (normalized.includes("영해")) return "영해면";
+  if (normalized.includes("병곡")) return "병곡면";
+  if (normalized.includes("창수")) return "창수면";
+  if (normalized.includes("축산")) return "축산면";
 
   return normalized;
 }
