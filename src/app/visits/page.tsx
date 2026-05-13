@@ -59,7 +59,9 @@ const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 const VALID_VISIT_INTERVAL_MONTHS = 3;
 
 function normalizeRegion(region?: string) {
-  const normalized = String(region ?? "").trim().replace(/\s/g, "");
+  const normalized = String(region ?? "")
+    .trim()
+    .replace(/\s/g, "");
 
   if (normalized.includes("후포")) return "후포면";
   if (normalized.includes("평해")) return "평해읍";
@@ -123,6 +125,7 @@ export default function VisitsPage() {
   const [openZone, setOpenZone] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
+  const [updatingSelectedLogs, setUpdatingSelectedLogs] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [generatingWord, setGeneratingWord] = useState(false);
 
@@ -172,7 +175,7 @@ export default function VisitsPage() {
       try {
         const q = query(
           collection(db, "visitLogs"),
-          orderBy("createdAt", "desc")
+          orderBy("createdAt", "desc"),
         );
 
         const querySnapshot = await getDocs(q);
@@ -229,7 +232,7 @@ export default function VisitsPage() {
     setSelectedLogs((prev) =>
       prev.includes(logId)
         ? prev.filter((id) => id !== logId)
-        : [...prev, logId]
+        : [...prev, logId],
     );
   }
 
@@ -256,9 +259,7 @@ export default function VisitsPage() {
     const filteredIds = filteredLogs.map((log) => log.id);
 
     if (allFilteredSelected) {
-      setSelectedLogs((prev) =>
-        prev.filter((id) => !filteredIds.includes(id))
-      );
+      setSelectedLogs((prev) => prev.filter((id) => !filteredIds.includes(id)));
     } else {
       setSelectedLogs((prev) => {
         const next = new Set(prev);
@@ -312,8 +313,8 @@ export default function VisitsPage() {
           day: "2-digit",
           hour: "2-digit",
           minute: "2-digit",
-        }
-      )}`
+        },
+      )}`,
     );
 
     if (!ok) return;
@@ -337,9 +338,9 @@ export default function VisitsPage() {
                   createdAt: nextTimestamp,
                   visitorName: nextVisitorName,
                 }
-              : item
-          )
-        )
+              : item,
+          ),
+        ),
       );
 
       setEditingLogId(null);
@@ -383,7 +384,7 @@ export default function VisitsPage() {
     }
 
     const ok = confirm(
-      `선택한 ${selectedLogs.length}개 방문 기록을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`
+      `선택한 ${selectedLogs.length}개 방문 기록을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
     );
 
     if (!ok) return;
@@ -400,7 +401,7 @@ export default function VisitsPage() {
       await batch.commit();
 
       setVisitLogs((prev) =>
-        prev.filter((log) => !selectedLogs.includes(log.id))
+        prev.filter((log) => !selectedLogs.includes(log.id)),
       );
 
       setSelectedLogs([]);
@@ -415,9 +416,125 @@ export default function VisitsPage() {
     }
   }
 
+  async function handleUpdateSelectedLogs() {
+    if (selectedLogs.length === 0) {
+      alert("선택된 방문 기록이 없습니다.");
+      return;
+    }
+
+    const nextVisitorName = prompt(
+      `선택한 ${selectedLogs.length}개 방문 기록의 방문자 이름을 바꾸려면 입력해주세요.
+이름은 그대로 두려면 빈칸으로 확인을 누르세요.`,
+      "",
+    );
+
+    if (nextVisitorName === null) return;
+
+    const nextDateValue = prompt(
+      `선택한 ${selectedLogs.length}개 방문 기록의 날짜를 바꾸려면 아래 형식으로 입력해주세요.
+예: 2026-05-14 19:30
+날짜는 그대로 두려면 빈칸으로 확인을 누르세요.`,
+      "",
+    );
+
+    if (nextDateValue === null) return;
+
+    const trimmedName = nextVisitorName.trim();
+    const trimmedDateValue = nextDateValue.trim();
+
+    if (!trimmedName && !trimmedDateValue) {
+      alert("수정할 방문자 이름이나 날짜를 입력해주세요.");
+      return;
+    }
+
+    let nextTimestamp: Timestamp | null = null;
+    let nextDate: Date | null = null;
+
+    if (trimmedDateValue) {
+      const normalizedDateValue = trimmedDateValue.includes("T")
+        ? trimmedDateValue
+        : trimmedDateValue.replace(" ", "T");
+
+      nextDate = new Date(normalizedDateValue);
+
+      if (Number.isNaN(nextDate.getTime())) {
+        alert("날짜 형식이 올바르지 않습니다. 예: 2026-05-14 19:30");
+        return;
+      }
+
+      nextTimestamp = Timestamp.fromDate(nextDate);
+    }
+
+    const updateData: Partial<Pick<VisitLog, "visitorName" | "createdAt">> = {};
+
+    if (trimmedName) {
+      updateData.visitorName = trimmedName;
+    }
+
+    if (nextTimestamp) {
+      updateData.createdAt = nextTimestamp;
+    }
+
+    const confirmLines = [
+      `선택한 ${selectedLogs.length}개 방문 기록을 수정할까요?`,
+    ];
+
+    if (trimmedName) {
+      confirmLines.push(`방문자 이름: ${trimmedName}`);
+    }
+
+    if (nextDate) {
+      confirmLines.push(
+        `방문 날짜: ${nextDate.toLocaleString("ko-KR", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+      );
+    }
+
+    const ok = confirm(confirmLines.join("\n"));
+
+    if (!ok) return;
+
+    try {
+      setUpdatingSelectedLogs(true);
+
+      const batch = writeBatch(db);
+
+      selectedLogs.forEach((logId) => {
+        batch.update(doc(db, "visitLogs", logId), updateData);
+      });
+
+      await batch.commit();
+
+      setVisitLogs((prev) =>
+        sortVisitLogsDesc(
+          prev.map((log) =>
+            selectedLogs.includes(log.id)
+              ? {
+                  ...log,
+                  ...updateData,
+                }
+              : log,
+          ),
+        ),
+      );
+
+      alert("선택한 방문 기록이 수정되었습니다.");
+    } catch (error) {
+      console.error("선택 방문 기록 수정 에러:", error);
+      alert("선택 수정 실패");
+    } finally {
+      setUpdatingSelectedLogs(false);
+    }
+  }
+
   async function handleDeleteAll() {
     const ok = confirm(
-      "전체 방문 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+      "전체 방문 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
     );
 
     if (!ok) return;
@@ -530,14 +647,14 @@ export default function VisitsPage() {
         if (paragraph.parentNode === cell) {
           cell.removeChild(paragraph);
         }
-      }
+      },
     );
   }
 
   function setCellText(
     xmlDoc: XMLDocument,
     cell: Element | undefined,
-    text: string
+    text: string,
   ) {
     if (!cell) return;
 
@@ -548,7 +665,7 @@ export default function VisitsPage() {
   function setCellLines(
     xmlDoc: XMLDocument,
     cell: Element | undefined,
-    lines: string[]
+    lines: string[],
   ) {
     if (!cell) return;
 
@@ -587,7 +704,7 @@ export default function VisitsPage() {
         isAtLeastMonthsAfter(
           currentDate,
           lastValidDate,
-          VALID_VISIT_INTERVAL_MONTHS
+          VALID_VISIT_INTERVAL_MONTHS,
         )
       ) {
         validLogs.push(log);
@@ -628,7 +745,7 @@ export default function VisitsPage() {
 
       if (!response.ok) {
         alert(
-          "Word 양식 파일을 찾을 수 없습니다.\npublic/templates/구역배정기록 S-13_KO.docx 위치를 확인해주세요."
+          "Word 양식 파일을 찾을 수 없습니다.\npublic/templates/구역배정기록 S-13_KO.docx 위치를 확인해주세요.",
         );
         return;
       }
@@ -659,7 +776,7 @@ export default function VisitsPage() {
       setCellText(xmlDoc, serviceYearCells[1], String(getServiceYear()));
 
       const originalRows = Array.from(
-        recordTable.getElementsByTagNameNS(WORD_NS, "tr")
+        recordTable.getElementsByTagNameNS(WORD_NS, "tr"),
       );
 
       const headerRows = originalRows.slice(0, 2);
@@ -677,7 +794,11 @@ export default function VisitsPage() {
 
       const validLogsByZoneNumber = getValidLogsByZoneNumber();
 
-      for (let zoneNumber = 1; zoneNumber <= TOTAL_ZONE_COUNT; zoneNumber += 1) {
+      for (
+        let zoneNumber = 1;
+        zoneNumber <= TOTAL_ZONE_COUNT;
+        zoneNumber += 1
+      ) {
         const firstRow = firstDataRowTemplate.cloneNode(true) as Element;
         const secondRow = secondDataRowTemplate.cloneNode(true) as Element;
 
@@ -728,7 +849,7 @@ export default function VisitsPage() {
 
       const today = new Date();
       const fileDate = `${today.getFullYear()}-${String(
-        today.getMonth() + 1
+        today.getMonth() + 1,
       ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
       saveAs(blob, `구역배정기록-${getServiceYear()}봉사연도-${fileDate}.docx`);
@@ -847,6 +968,17 @@ export default function VisitsPage() {
             {allFilteredSelected ? "전체 해제" : "전체 선택"}
           </button>
 
+          {role === "admin" && (
+            <button
+              onClick={handleUpdateSelectedLogs}
+              disabled={updatingSelectedLogs || selectedLogs.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+            >
+              <Pencil size={16} />
+              {updatingSelectedLogs ? "수정 중..." : "선택 수정"}
+            </button>
+          )}
+
           <button
             onClick={handleDeleteSelectedLogs}
             disabled={deletingSelected || selectedLogs.length === 0}
@@ -872,7 +1004,7 @@ export default function VisitsPage() {
             {groupedLogs.map(({ zoneName, logs, latestLog }) => {
               const isOpen = openZone === zoneName;
               const selectedCount = logs.filter((log) =>
-                selectedLogs.includes(log.id)
+                selectedLogs.includes(log.id),
               ).length;
               const allZoneSelected =
                 logs.length > 0 &&
@@ -1021,7 +1153,9 @@ export default function VisitsPage() {
                                       type="text"
                                       value={editingVisitorName}
                                       onChange={(event) =>
-                                        setEditingVisitorName(event.target.value)
+                                        setEditingVisitorName(
+                                          event.target.value,
+                                        )
                                       }
                                       placeholder="방문자 이름"
                                       className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
@@ -1038,7 +1172,9 @@ export default function VisitsPage() {
 
                                     <div className="flex gap-2">
                                       <button
-                                        onClick={() => handleUpdateVisitDate(log)}
+                                        onClick={() =>
+                                          handleUpdateVisitDate(log)
+                                        }
                                         disabled={updatingDateId === log.id}
                                         className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow disabled:opacity-50"
                                       >
