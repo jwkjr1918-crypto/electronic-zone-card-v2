@@ -31,6 +31,7 @@ import {
   Plus,
   Trash2,
   TriangleAlert,
+  Lock,
 } from "lucide-react";
 
 import { db, auth } from "@/firebase/firebase";
@@ -48,6 +49,8 @@ const regions = [
   "축산면",
 ];
 
+const VISIT_LOCK_MONTHS = 3;
+
 interface Zone {
   firestoreId: string;
   id?: number;
@@ -64,6 +67,34 @@ interface VisitLog {
   zoneNumber?: number;
   visitorName?: string;
   createdAt?: Timestamp | null;
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function isVisitLocked(createdAt?: Timestamp | null) {
+  if (!createdAt?.seconds) return false;
+
+  const latestDate = new Date(createdAt.seconds * 1000);
+  const nextAvailableDate = addMonths(latestDate, VISIT_LOCK_MONTHS);
+
+  return new Date() < nextAvailableDate;
+}
+
+function formatNextAvailableDate(createdAt?: Timestamp | null) {
+  if (!createdAt?.seconds) return "";
+
+  return addMonths(
+    new Date(createdAt.seconds * 1000),
+    VISIT_LOCK_MONTHS
+  ).toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 export default function AdminZonesPage() {
@@ -233,6 +264,12 @@ export default function AdminZonesPage() {
 
   const duplicateCount = duplicateZoneIds.size;
 
+  const lockedSelectedCount = zones.filter(
+    (zone) =>
+      selectedZones.includes(zone.firestoreId) &&
+      isVisitLocked(zone.lastVisitedAt)
+  ).length;
+
   const filteredZones = zones.filter((zone) => {
     return selectedRegion === "전체" ? true : zone.region === selectedRegion;
   });
@@ -318,16 +355,40 @@ export default function AdminZonesPage() {
       return;
     }
 
+    const targetZones = zones.filter((zone) =>
+      selectedZones.includes(zone.firestoreId)
+    );
+
+    const lockedZones = targetZones.filter((zone) =>
+      isVisitLocked(zone.lastVisitedAt)
+    );
+
+    if (lockedZones.length > 0) {
+      const preview = lockedZones
+        .slice(0, 5)
+        .map(
+          (zone) =>
+            `${zone.id}번 ${zone.name} - ${formatNextAvailableDate(
+              zone.lastVisitedAt
+            )} 이후 가능`
+        )
+        .join("\n");
+
+      alert(
+        `선택한 구역 중 ${lockedZones.length}개는 최근 방문완료 후 ${VISIT_LOCK_MONTHS}개월이 지나지 않았습니다.\n\n${preview}${
+          lockedZones.length > 5 ? "\n..." : ""
+        }`
+      );
+
+      return;
+    }
+
     const ok = confirm(`${selectedZones.length}개 구역을 방문완료 처리할까요?`);
 
     if (!ok) return;
 
     try {
       setBulkCompleting(true);
-
-      const targetZones = zones.filter((zone) =>
-        selectedZones.includes(zone.firestoreId)
-      );
 
       await Promise.all(
         targetZones.map((zone) =>
@@ -605,6 +666,16 @@ export default function AdminZonesPage() {
                   </div>
                 )}
 
+                {lockedSelectedCount > 0 && (
+                  <div className="mt-2 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    <Lock size={17} />
+                    <span className="font-bold">
+                      선택 구역 중 {lockedSelectedCount}개는 3개월 미만으로
+                      방문완료 불가
+                    </span>
+                  </div>
+                )}
+
                 <Tabs defaultValue="전체" className="mt-4">
                   <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
                     {regions.map((region) => (
@@ -685,6 +756,7 @@ export default function AdminZonesPage() {
               {filteredZones.map((zone) => {
                 const checked = selectedZones.includes(zone.firestoreId);
                 const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
+                const locked = isVisitLocked(zone.lastVisitedAt);
 
                 return (
                   <div
@@ -745,6 +817,14 @@ export default function AdminZonesPage() {
                             <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
                               <TriangleAlert size={11} />
                               중복번호
+                            </div>
+                          )}
+
+                          {locked && (
+                            <div className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                              <Lock size={11} />
+                              {formatNextAvailableDate(zone.lastVisitedAt)} 이후
+                              완료 가능
                             </div>
                           )}
 
