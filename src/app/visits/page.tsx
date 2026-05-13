@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { db, auth } from "@/firebase/firebase";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
 import PizZip from "pizzip";
@@ -119,6 +119,8 @@ function toDateTimeLocalValue(createdAt?: Timestamp | null) {
 }
 
 export default function VisitsPage() {
+  const lastSelectedLogIdRef = useRef<string | null>(null);
+
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -224,16 +226,52 @@ export default function VisitsPage() {
     }));
   }, [filteredLogs]);
 
+  const orderedFilteredLogIds = useMemo(() => {
+    return groupedLogs.flatMap((group) => group.logs.map((log) => log.id));
+  }, [groupedLogs]);
+
   const allFilteredSelected =
     filteredLogs.length > 0 &&
     filteredLogs.every((log) => selectedLogs.includes(log.id));
 
-  function toggleLog(logId: string) {
-    setSelectedLogs((prev) =>
-      prev.includes(logId)
-        ? prev.filter((id) => id !== logId)
-        : [...prev, logId],
-    );
+  function toggleLog(logId: string, shiftKey = false, nextChecked?: boolean) {
+    const previousLogId = lastSelectedLogIdRef.current;
+    lastSelectedLogIdRef.current = logId;
+
+    if (shiftKey && previousLogId && previousLogId !== logId) {
+      const previousIndex = orderedFilteredLogIds.indexOf(previousLogId);
+      const currentIndex = orderedFilteredLogIds.indexOf(logId);
+
+      if (previousIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(previousIndex, currentIndex);
+        const end = Math.max(previousIndex, currentIndex);
+        const rangeIds = orderedFilteredLogIds.slice(start, end + 1);
+
+        setSelectedLogs((prev) => {
+          if (nextChecked === false) {
+            return prev.filter((id) => !rangeIds.includes(id));
+          }
+
+          const next = new Set(prev);
+
+          rangeIds.forEach((id) => {
+            next.add(id);
+          });
+
+          return Array.from(next);
+        });
+
+        return;
+      }
+    }
+
+    setSelectedLogs((prev) => {
+      const shouldCheck = nextChecked ?? !prev.includes(logId);
+
+      return shouldCheck
+        ? [...prev, logId]
+        : prev.filter((id) => id !== logId);
+    });
   }
 
   function toggleZoneLogs(logs: VisitLog[]) {
@@ -993,6 +1031,10 @@ export default function VisitsPage() {
           <div className="rounded-full bg-white px-3 py-1 text-sm text-slate-500 shadow">
             선택 {selectedLogs.length}개
           </div>
+
+          <div className="text-xs text-slate-500">
+            Shift를 누른 채 체크하면 여러 개를 한 번에 선택할 수 있습니다.
+          </div>
             </div>
           </div>
         </div>
@@ -1104,7 +1146,16 @@ export default function VisitsPage() {
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    onChange={() => toggleLog(log.id)}
+                                    onChange={(event) => {
+                                      const nativeEvent =
+                                        event.nativeEvent as MouseEvent;
+
+                                      toggleLog(
+                                        log.id,
+                                        nativeEvent.shiftKey,
+                                        event.target.checked,
+                                      );
+                                    }}
                                     className="h-6 w-6 shrink-0 accent-red-500"
                                   />
 
