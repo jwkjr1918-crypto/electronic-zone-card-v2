@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
+  TriangleAlert,
+  Clock3,
 } from "lucide-react";
 
 import {
@@ -33,7 +35,7 @@ const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
 
 type RegionGroup = "전체" | "후포지역" | "영해지역";
 
-type SortType = "todo" | "number";
+type SortType = "todo" | "number" | "oldest";
 
 interface Zone {
   firestoreId: string;
@@ -182,6 +184,31 @@ export default function Home() {
     };
   }, []);
 
+  const duplicateZoneIds = useMemo(() => {
+    const countMap = new Map<number, number>();
+
+    zones.forEach((zone) => {
+      if (typeof zone.id !== "number") return;
+
+      countMap.set(
+        zone.id,
+        (countMap.get(zone.id) || 0) + 1
+      );
+    });
+
+    return new Set(
+      zones
+        .filter(
+          (zone) =>
+            typeof zone.id === "number" &&
+            (countMap.get(zone.id) || 0) > 1
+        )
+        .map((zone) => zone.firestoreId)
+    );
+  }, [zones]);
+
+  const duplicateCount = duplicateZoneIds.size;
+
   const subRegions = useMemo(() => {
     if (selectedRegionGroup === "후포지역") {
       return ["전체", ...HUPO_REGIONS];
@@ -228,9 +255,22 @@ export default function Home() {
       );
     });
 
-    return [...filtered].sort(
-      (a, b) => (a.id ?? 0) - (b.id ?? 0)
-    );
+    return [...filtered].sort((a, b) => {
+      if (sortType === "oldest") {
+        const aTime =
+          a.lastVisitedAt?.seconds ?? 0;
+
+        const bTime =
+          b.lastVisitedAt?.seconds ?? 0;
+
+        if (!a.lastVisitedAt?.seconds) return -1;
+        if (!b.lastVisitedAt?.seconds) return 1;
+
+        return aTime - bTime;
+      }
+
+      return (a.id ?? 0) - (b.id ?? 0);
+    });
   }, [
     zones,
     search,
@@ -274,6 +314,15 @@ export default function Home() {
           </p>
         </div>
 
+        {duplicateCount > 0 && (
+          <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 shadow-sm">
+            <TriangleAlert size={18} />
+            <span className="font-semibold">
+              중복된 구역번호 {duplicateCount}개 발견
+            </span>
+          </div>
+        )}
+
         <div className="relative mb-3">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -290,7 +339,7 @@ export default function Home() {
           />
         </div>
 
-        <div className="mb-3 grid grid-cols-2 gap-2">
+        <div className="mb-3 grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setSortType("todo")}
@@ -301,6 +350,19 @@ export default function Home() {
             }`}
           >
             방문할 곳
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSortType("oldest")}
+            className={`flex items-center justify-center gap-1 rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+              sortType === "oldest"
+                ? "bg-orange-600 text-white"
+                : "bg-white text-slate-600"
+            }`}
+          >
+            <Clock3 size={14} />
+            오래된 순
           </button>
 
           <button
@@ -316,7 +378,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* 상위 지역 탭 */}
         <Tabs
           value={selectedRegionGroup}
           className="mb-2"
@@ -343,7 +404,6 @@ export default function Home() {
           </TabsList>
         </Tabs>
 
-        {/* 하위 지역 탭 */}
         {selectedRegionGroup !== "전체" && (
           <Tabs
             value={selectedSubRegion}
@@ -385,6 +445,11 @@ export default function Home() {
                 zone.firestoreId
               );
 
+            const isDuplicate =
+              duplicateZoneIds.has(
+                zone.firestoreId
+              );
+
             return (
               <Link
                 href={`/zone/${zone.firestoreId}`}
@@ -392,11 +457,13 @@ export default function Home() {
               >
                 <Card
                   className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-                    isActive
-                      ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
-                      : isVisited
-                        ? "border-slate-200 bg-slate-50 opacity-85"
-                        : "border-slate-200 bg-white"
+                    isDuplicate
+                      ? "border-red-300 bg-red-50 ring-1 ring-red-100"
+                      : isActive
+                        ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
+                        : isVisited
+                          ? "border-slate-200 bg-slate-50 opacity-85"
+                          : "border-slate-200 bg-white"
                   }`}
                 >
                   <CardContent className="p-3 sm:p-3.5">
@@ -404,11 +471,13 @@ export default function Home() {
                       <div className="flex min-w-0 items-start gap-2">
                         <div
                           className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
-                            isActive
-                              ? "bg-emerald-600"
-                              : isVisited
-                                ? "bg-slate-500"
-                                : "bg-slate-900"
+                            isDuplicate
+                              ? "bg-red-600"
+                              : isActive
+                                ? "bg-emerald-600"
+                                : isVisited
+                                  ? "bg-slate-500"
+                                  : "bg-slate-900"
                           }`}
                         >
                           {zone.id}.
@@ -417,11 +486,13 @@ export default function Home() {
                         <div className="min-w-0 flex-1">
                           <h3
                             className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
-                              isActive
-                                ? "text-emerald-950"
-                                : isVisited
-                                  ? "text-slate-700"
-                                  : "text-slate-900"
+                              isDuplicate
+                                ? "text-red-900"
+                                : isActive
+                                  ? "text-emerald-950"
+                                  : isVisited
+                                    ? "text-slate-700"
+                                    : "text-slate-900"
                             }`}
                           >
                             {zone.name}
@@ -433,41 +504,52 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div
-                        className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
-                          isActive
-                            ? "bg-emerald-600 text-white"
-                            : isVisited
-                              ? "bg-slate-200 text-slate-600"
-                              : "bg-blue-50 text-blue-700"
-                        }`}
-                      >
-                        {isActive ? (
-                          <>
-                            <Eye size={11} />
-                            방문중
-                          </>
-                        ) : isVisited ? (
-                          <>
-                            <CheckCircle2 size={11} />
-                            완료
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle size={11} />
-                            방문 필요
-                          </>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {isDuplicate && (
+                          <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[10px] font-bold text-white sm:text-[11px]">
+                            <TriangleAlert size={11} />
+                            중복번호
+                          </div>
                         )}
+
+                        <div
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                            isActive
+                              ? "bg-emerald-600 text-white"
+                              : isVisited
+                                ? "bg-slate-200 text-slate-600"
+                                : "bg-blue-50 text-blue-700"
+                          }`}
+                        >
+                          {isActive ? (
+                            <>
+                              <Eye size={11} />
+                              방문중
+                            </>
+                          ) : isVisited ? (
+                            <>
+                              <CheckCircle2 size={11} />
+                              완료
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle size={11} />
+                              방문 필요
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     <div
                       className={`mt-3 rounded-lg px-2.5 py-2 ${
-                        isActive
-                          ? "bg-white/80"
-                          : isVisited
-                            ? "bg-slate-100"
-                            : "bg-slate-50"
+                        isDuplicate
+                          ? "bg-red-100/60"
+                          : isActive
+                            ? "bg-white/80"
+                            : isVisited
+                              ? "bg-slate-100"
+                              : "bg-slate-50"
                       }`}
                     >
                       <div className="text-[10px] text-slate-400 sm:text-[11px]">
@@ -476,11 +558,13 @@ export default function Home() {
 
                       <div
                         className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
-                          isActive
-                            ? "text-emerald-800"
-                            : isVisited
-                              ? "text-slate-700"
-                              : "text-slate-600"
+                          isDuplicate
+                            ? "text-red-800"
+                            : isActive
+                              ? "text-emerald-800"
+                              : isVisited
+                                ? "text-slate-700"
+                                : "text-slate-600"
                         }`}
                       >
                         {zone.lastVisitedAt?.seconds
