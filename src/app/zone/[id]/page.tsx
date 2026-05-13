@@ -20,6 +20,7 @@ import {
   serverTimestamp,
   setDoc,
   deleteDoc,
+  updateDoc,
 } from "firebase/firestore";
 
 import {
@@ -30,6 +31,10 @@ import {
   X,
   RotateCw,
   Lock,
+  Navigation,
+  Loader2,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 
 import { db, auth } from "@/firebase/firebase";
@@ -39,6 +44,7 @@ interface Zone {
   name: string;
   region: string;
   imageUrl?: string;
+  addresses?: string[];
 }
 
 interface VisitLog {
@@ -99,6 +105,59 @@ function formatDate(date: Date) {
   });
 }
 
+function getUniqueValues(values: string[]) {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  );
+}
+
+function extractRoadAddressesFromText(text: string) {
+  const cleanedText = text
+    .replace(/[|·•]/g, " ")
+    .replace(/\r/g, "\n")
+    .replace(/([가-힣0-9])\s+(대로|번길|로|길)/g, "$1$2")
+    .replace(/(대로|번길|로|길)\s+(\d)/g, "$1 $2")
+    .replace(/\n+(?=\d)/g, " ")
+    .replace(/\s+/g, " ");
+
+  const matches = cleanedText.match(
+    /[가-힣0-9]{1,24}(?:대로|번길|로|길)\s*\d{1,5}(?:-\d{1,5})?/g,
+  );
+
+  if (!matches) return [];
+
+  return getUniqueValues(
+    matches.map((match) =>
+      match
+        .replace(/\s+/g, " ")
+        .replace(/(대로|번길|로|길)\s*(\d)/, "$1 $2")
+        .trim(),
+    ),
+  );
+}
+
+function getMapSearchQuery(zone: Zone, address: string) {
+  const trimmedAddress = address.trim();
+
+  if (/^(경북|경상북도|영덕군)/.test(trimmedAddress)) {
+    return trimmedAddress;
+  }
+
+  return `경상북도 영덕군 ${zone.region} ${trimmedAddress}`;
+}
+
+function getNaverMapUrl(zone: Zone, address: string) {
+  return `https://map.naver.com/p/search/${encodeURIComponent(
+    getMapSearchQuery(zone, address),
+  )}`;
+}
+
+function getKakaoMapUrl(zone: Zone, address: string) {
+  return `https://map.kakao.com/link/search/${encodeURIComponent(
+    getMapSearchQuery(zone, address),
+  )}`;
+}
+
 export default function ZoneDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -111,6 +170,9 @@ export default function ZoneDetailPage() {
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [savingVisit, setSavingVisit] = useState(false);
+  const [addresses, setAddresses] = useState<string[]>([]);
+  const [extractingAddresses, setExtractingAddresses] = useState(false);
+  const [addressExtracted, setAddressExtracted] = useState(false);
 
   const fromEvangelist = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -137,8 +199,7 @@ export default function ZoneDetailPage() {
 
     const remainingDays = locked
       ? Math.ceil(
-          (nextAvailableDate.getTime() - now.getTime()) /
-            (1000 * 60 * 60 * 24)
+          (nextAvailableDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
         )
       : 0;
 
@@ -156,7 +217,10 @@ export default function ZoneDetailPage() {
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          setZone(docSnap.data() as Zone);
+          const zoneData = docSnap.data() as Zone;
+
+          setZone(zoneData);
+          setAddresses(zoneData.addresses || []);
         }
       } catch (error) {
         console.error("구역 조회 에러:", error);
@@ -171,7 +235,7 @@ export default function ZoneDetailPage() {
           collection(db, "visitLogs"),
           where("zoneId", "==", id),
           orderBy("createdAt", "desc"),
-          limit(1)
+          limit(1),
         );
 
         const querySnapshot = await getDocs(q);
@@ -214,7 +278,7 @@ export default function ZoneDetailPage() {
           updatedAt: serverTimestamp(),
           expiresAt: Date.now() + ACTIVE_VIEW_EXPIRE_MS,
         },
-        { merge: true }
+        { merge: true },
       );
     }
 
@@ -306,8 +370,67 @@ export default function ZoneDetailPage() {
     };
   }, [imageOpen]);
 
+  useEffect(() => {
+    if (!zone?.imageUrl || addresses.length > 0 || addressExtracted) return;
+
+    extractAddressesFromImage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zone?.imageUrl, addresses.length, addressExtracted]);
+
   function closeImage() {
     setImageOpen(false);
+  }
+
+  async function extractAddressesFromImage(force = false) {
+    if (!zone?.imageUrl || extractingAddresses) return;
+
+    if (!force && addresses.length > 0) {
+      setAddressExtracted(true);
+      return;
+    }
+
+    try {
+      setExtractingAddresses(true);
+
+      const Tesseract = await import("tesseract.js");
+
+      const result = await Tesseract.recognize(zone.imageUrl, "kor+eng", {
+        logger: () => {
+          // OCR 진행률은 현재 UI에서는 표시하지 않습니다.
+        },
+      });
+
+      const extractedAddresses = extractRoadAddressesFromText(result.data.text);
+
+      if (extractedAddresses.length === 0) {
+        alert(
+          "이미지에서 주소를 찾지 못했습니다. 관리자 구역 수정 화면에서 직접 입력할 수 있습니다.",
+        );
+        return;
+      }
+
+      await updateDoc(doc(db, "zones", id), {
+        addresses: extractedAddresses,
+      });
+
+      setAddresses(extractedAddresses);
+      setZone((prev) =>
+        prev
+          ? {
+              ...prev,
+              addresses: extractedAddresses,
+            }
+          : prev,
+      );
+      setAddressExtracted(true);
+    } catch (error) {
+      console.error("주소 OCR 추출 에러:", error);
+      alert(
+        "주소 자동 추출에 실패했습니다. 관리자 구역 수정 화면에서 직접 입력할 수 있습니다.",
+      );
+    } finally {
+      setExtractingAddresses(false);
+    }
   }
 
   async function refreshRecentVisit() {
@@ -315,7 +438,7 @@ export default function ZoneDetailPage() {
       collection(db, "visitLogs"),
       where("zoneId", "==", id),
       orderBy("createdAt", "desc"),
-      limit(1)
+      limit(1),
     );
 
     const querySnapshot = await getDocs(q);
@@ -336,8 +459,8 @@ export default function ZoneDetailPage() {
     if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
       alert(
         `최근 방문완료 후 ${VISIT_LOCK_MONTHS}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
-          visitLockInfo.nextAvailableDate
-        )}`
+          visitLockInfo.nextAvailableDate,
+        )}`,
       );
       return;
     }
@@ -443,6 +566,78 @@ export default function ZoneDetailPage() {
                 </div>
               )}
 
+              {zone.imageUrl && (
+                <div className="mt-4 rounded-2xl bg-white/10 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-bold text-white">
+                      <Navigation size={16} />
+                      주소 바로가기
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => extractAddressesFromImage(true)}
+                      disabled={extractingAddresses}
+                      className="inline-flex items-center gap-1 rounded-xl bg-white/15 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
+                    >
+                      {extractingAddresses ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <RefreshCw size={13} />
+                      )}
+                      {extractingAddresses ? "추출 중" : "다시 추출"}
+                    </button>
+                  </div>
+
+                  {extractingAddresses ? (
+                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-white/10 px-3 py-3 text-sm text-slate-200">
+                      <Loader2 size={16} className="animate-spin" />
+                      이미지에서 주소를 읽는 중입니다...
+                    </div>
+                  ) : addresses.length > 0 ? (
+                    <div className="mt-3 grid gap-2">
+                      {addresses.map((address) => (
+                        <div
+                          key={address}
+                          className="rounded-xl bg-white px-3 py-2 text-slate-900"
+                        >
+                          <div className="mb-2 text-sm font-bold">
+                            {address}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <a
+                              href={getNaverMapUrl(zone, address)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2 py-2 text-xs font-bold text-white"
+                            >
+                              <ExternalLink size={13} />
+                              네이버지도
+                            </a>
+
+                            <a
+                              href={getKakaoMapUrl(zone, address)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-yellow-400 px-2 py-2 text-xs font-bold text-slate-950"
+                            >
+                              <ExternalLink size={13} />
+                              카카오맵
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-xl bg-white/10 px-3 py-3 text-sm text-slate-300">
+                      아직 추출된 주소가 없습니다. 주소가 보이는 이미지라면
+                      자동으로 추출됩니다.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="mt-5 flex items-center gap-2 text-slate-300">
                 <MapPin size={18} />
                 <span>{zone.region}</span>
@@ -511,7 +706,7 @@ export default function ZoneDetailPage() {
                 <p className="mt-1 text-sm text-slate-500">
                   {recentVisit.createdAt?.seconds
                     ? formatDateTime(
-                        new Date(recentVisit.createdAt.seconds * 1000)
+                        new Date(recentVisit.createdAt.seconds * 1000),
                       )
                     : "시간 정보 없음"}
                 </p>

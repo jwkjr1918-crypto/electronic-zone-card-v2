@@ -15,7 +15,7 @@ import {
   deleteObject,
 } from "firebase/storage";
 
-import { ArrowLeft, Save, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Save, Image as ImageIcon, MapPin } from "lucide-react";
 
 import { db, storage } from "@/firebase/firebase";
 
@@ -24,11 +24,12 @@ interface Zone {
   name: string;
   region: string;
   imageUrl?: string;
+  addresses?: string[];
 }
 
 const regions = [
   "후포면",
-  "평해면",
+  "평해읍",
   "온정면",
   "기성면",
   "영해면",
@@ -76,13 +77,13 @@ const compressImage = (file: File): Promise<File> => {
             file.name.replace(/\.[^/.]+$/, ".jpg"),
             {
               type: "image/jpeg",
-            }
+            },
           );
 
           resolve(compressedFile);
         },
         "image/jpeg",
-        0.7
+        0.7,
       );
     };
 
@@ -103,6 +104,7 @@ export default function AdminZoneEditPage() {
   const [name, setName] = useState("");
   const [region, setRegion] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [addressesText, setAddressesText] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -121,6 +123,7 @@ export default function AdminZoneEditPage() {
           setName(data.name || "");
           setRegion(data.region || "");
           setImageUrl(data.imageUrl || "");
+          setAddressesText((data.addresses || []).join("\n"));
         }
       } catch (error) {
         console.error("구역 조회 에러:", error);
@@ -147,7 +150,7 @@ export default function AdminZoneEditPage() {
           } catch (error) {
             console.error("기존 이미지 삭제 실패:", error);
           }
-        })
+        }),
       );
     } catch (error) {
       console.error("기존 이미지 조회 실패:", error);
@@ -168,7 +171,7 @@ export default function AdminZoneEditPage() {
 
       const storageRef = ref(
         storage,
-        `zones/${id}/${Date.now()}_${compressedFile.name}`
+        `zones/${id}/${Date.now()}_${compressedFile.name}`,
       );
 
       await uploadBytes(storageRef, compressedFile);
@@ -177,7 +180,11 @@ export default function AdminZoneEditPage() {
 
       setImageUrl(downloadURL);
 
-      alert("기존 이미지를 삭제하고 새 이미지로 교체했습니다. 저장 버튼을 눌러주세요.");
+      setAddressesText("");
+
+      alert(
+        "기존 이미지를 삭제하고 새 이미지로 교체했습니다. 저장 버튼을 눌러주세요. 새 이미지 주소는 상세페이지에서 자동 추출됩니다.",
+      );
     } catch (error) {
       console.error("이미지 업로드 에러:", error);
       alert("이미지 업로드 실패");
@@ -194,10 +201,16 @@ export default function AdminZoneEditPage() {
 
       const docRef = doc(db, "zones", id);
 
+      const addresses = addressesText
+        .split("\n")
+        .map((address) => address.trim())
+        .filter(Boolean);
+
       await updateDoc(docRef, {
         name,
         region,
         imageUrl,
+        addresses,
       });
 
       alert("구역 정보가 저장되었습니다!");
@@ -315,6 +328,25 @@ export default function AdminZoneEditPage() {
               <p className="mt-2 text-xs text-slate-400">
                 새 이미지를 업로드하면 기존 Storage 이미지는 자동 삭제됩니다.
                 업로드 후 저장 버튼을 눌러야 구역 정보에 최종 반영됩니다.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+                <MapPin size={18} />
+                주소 버튼 목록
+              </label>
+
+              <textarea
+                value={addressesText}
+                onChange={(e) => setAddressesText(e.target.value)}
+                className="min-h-36 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                placeholder={"예시:\n별영5길 12-8\n별영5길 12-1\n별영길 128"}
+              />
+
+              <p className="mt-2 text-xs text-slate-400">
+                한 줄에 주소 하나씩 입력하세요. 비워두면 상세페이지에서 이미지
+                OCR로 자동 추출을 시도합니다.
               </p>
             </div>
 
