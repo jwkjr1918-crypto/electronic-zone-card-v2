@@ -33,6 +33,14 @@ const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
 
 const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
 
+function normalizeRegion(region?: string) {
+  const normalized = String(region ?? "").trim().replace(/\s/g, "");
+
+  if (normalized === "평해") return "평해읍";
+
+  return normalized;
+}
+
 const THREE_MONTHS_AGO = () => {
   const date = new Date();
   date.setMonth(date.getMonth() - 3);
@@ -296,15 +304,15 @@ export default function Home() {
       if (selectedRegionGroup === "후포지역") {
         matchesRegion =
           selectedSubRegion === "전체"
-            ? HUPO_REGIONS.includes(zone.region)
-            : zone.region === selectedSubRegion;
+            ? HUPO_REGIONS.includes(normalizeRegion(zone.region))
+            : normalizeRegion(zone.region) === normalizeRegion(selectedSubRegion);
       }
 
       if (selectedRegionGroup === "영해지역") {
         matchesRegion =
           selectedSubRegion === "전체"
-            ? YEONGHAE_REGIONS.includes(zone.region)
-            : zone.region === selectedSubRegion;
+            ? YEONGHAE_REGIONS.includes(normalizeRegion(zone.region))
+            : normalizeRegion(zone.region) === normalizeRegion(selectedSubRegion);
       }
 
       return matchesSearch && matchesRegion;

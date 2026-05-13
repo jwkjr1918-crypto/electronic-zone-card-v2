@@ -54,6 +54,14 @@ const TOTAL_ZONE_COUNT = 484;
 const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 const VALID_VISIT_INTERVAL_MONTHS = 3;
 
+function normalizeRegion(region?: string) {
+  const normalized = String(region ?? "").trim().replace(/\s/g, "");
+
+  if (normalized === "평해") return "평해읍";
+
+  return normalized;
+}
+
 interface VisitLog {
   id: string;
   zoneId?: string;
@@ -148,7 +156,9 @@ export default function VisitsPage() {
 
   const filteredLogs = useMemo(() => {
     return visitLogs.filter((log) => {
-      return selectedRegion === "전체" ? true : log.region === selectedRegion;
+      return selectedRegion === "전체"
+        ? true
+        : normalizeRegion(log.region) === normalizeRegion(selectedRegion);
     });
   }, [visitLogs, selectedRegion]);
 

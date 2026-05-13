@@ -51,6 +51,14 @@ const regions = [
 
 const VISIT_LOCK_MONTHS = 3;
 
+function normalizeRegion(region?: string) {
+  const normalized = String(region ?? "").trim().replace(/\s/g, "");
+
+  if (normalized === "평해") return "평해읍";
+
+  return normalized;
+}
+
 interface Zone {
   firestoreId: string;
   id?: number;
@@ -271,7 +279,9 @@ export default function AdminZonesPage() {
   ).length;
 
   const filteredZones = zones.filter((zone) => {
-    return selectedRegion === "전체" ? true : zone.region === selectedRegion;
+    return selectedRegion === "전체"
+      ? true
+      : normalizeRegion(zone.region) === normalizeRegion(selectedRegion);
   });
 
   const allFilteredSelected =
