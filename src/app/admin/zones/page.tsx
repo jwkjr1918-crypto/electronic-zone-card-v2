@@ -1,7 +1,7 @@
 "use client";
 
 import type { MouseEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -30,6 +30,7 @@ import {
   MapPinned,
   Plus,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 
 import { db, auth } from "@/firebase/firebase";
@@ -38,7 +39,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const regions = [
   "전체",
   "후포면",
-  "평해면",
+  "평해읍",
   "온정면",
   "기성면",
   "영해면",
@@ -212,6 +213,26 @@ export default function AdminZonesPage() {
     }
   }, [loading, zones]);
 
+  const duplicateZoneIds = useMemo(() => {
+    const countMap = new Map<number, number>();
+
+    zones.forEach((zone) => {
+      if (typeof zone.id !== "number") return;
+      countMap.set(zone.id, (countMap.get(zone.id) || 0) + 1);
+    });
+
+    return new Set(
+      zones
+        .filter(
+          (zone) =>
+            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1
+        )
+        .map((zone) => zone.firestoreId)
+    );
+  }, [zones]);
+
+  const duplicateCount = duplicateZoneIds.size;
+
   const filteredZones = zones.filter((zone) => {
     return selectedRegion === "전체" ? true : zone.region === selectedRegion;
   });
@@ -252,11 +273,7 @@ export default function AdminZonesPage() {
 
         setSelectedZones((prev) => {
           const next = new Set(prev);
-
-          rangeIds.forEach((id) => {
-            next.add(id);
-          });
-
+          rangeIds.forEach((id) => next.add(id));
           return Array.from(next);
         });
 
@@ -285,11 +302,7 @@ export default function AdminZonesPage() {
     } else {
       setSelectedZones((prev) => {
         const next = new Set(prev);
-
-        filteredZones.forEach((zone) => {
-          next.add(zone.firestoreId);
-        });
-
+        filteredZones.forEach((zone) => next.add(zone.firestoreId));
         return Array.from(next);
       });
 
@@ -583,6 +596,15 @@ export default function AdminZonesPage() {
                   Firebase에 저장된 구역 데이터입니다.
                 </p>
 
+                {duplicateCount > 0 && (
+                  <div className="mt-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    <TriangleAlert size={17} />
+                    <span className="font-bold">
+                      중복 구역번호 {duplicateCount}개 발견
+                    </span>
+                  </div>
+                )}
+
                 <Tabs defaultValue="전체" className="mt-4">
                   <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
                     {regions.map((region) => (
@@ -662,6 +684,7 @@ export default function AdminZonesPage() {
             <div className="space-y-2">
               {filteredZones.map((zone) => {
                 const checked = selectedZones.includes(zone.firestoreId);
+                const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
 
                 return (
                   <div
@@ -679,9 +702,13 @@ export default function AdminZonesPage() {
                       }
                     }}
                     className={`flex cursor-pointer items-center justify-between gap-2 rounded-2xl px-3 py-2.5 transition sm:gap-3 sm:px-4 ${
-                      checked
-                        ? "bg-emerald-50 ring-2 ring-emerald-200"
-                        : "bg-slate-50 hover:bg-slate-100"
+                      isDuplicate
+                        ? checked
+                          ? "bg-red-50 ring-2 ring-red-300"
+                          : "bg-red-50 ring-1 ring-red-200 hover:bg-red-100"
+                        : checked
+                          ? "bg-emerald-50 ring-2 ring-emerald-200"
+                          : "bg-slate-50 hover:bg-slate-100"
                     }`}
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -698,13 +725,28 @@ export default function AdminZonesPage() {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                          <div className="shrink-0 rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white">
+                          <div
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white ${
+                              isDuplicate ? "bg-red-600" : "bg-slate-900"
+                            }`}
+                          >
                             {zone.id}번
                           </div>
 
-                          <div className="max-w-full truncate text-sm font-bold text-slate-900 sm:text-base">
+                          <div
+                            className={`max-w-full truncate text-sm font-bold sm:text-base ${
+                              isDuplicate ? "text-red-900" : "text-slate-900"
+                            }`}
+                          >
                             {zone.name}
                           </div>
+
+                          {isDuplicate && (
+                            <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                              <TriangleAlert size={11} />
+                              중복번호
+                            </div>
+                          )}
 
                           {zone.lastVisitedAt?.seconds ? (
                             <div className="text-[11px] text-slate-500 sm:text-xs">
