@@ -293,7 +293,9 @@ export default function AdminZonesPage() {
         return Array.from(next);
       });
 
-      setLastSelectedZoneId(filteredZones[filteredZones.length - 1]?.firestoreId ?? null);
+      setLastSelectedZoneId(
+        filteredZones[filteredZones.length - 1]?.firestoreId ?? null
+      );
     }
   }
 
@@ -569,80 +571,82 @@ export default function AdminZonesPage() {
         </section>
 
         <section className="rounded-3xl bg-white p-4 shadow sm:p-5">
-          <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <ClipboardList size={19} />
-                <h2 className="text-xl font-bold">구역 목록</h2>
+          <div className="sticky top-0 z-40 -mx-4 -mt-4 mb-4 rounded-t-3xl border-b border-slate-200 bg-white/95 p-4 backdrop-blur sm:-mx-5 sm:-mt-5 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ClipboardList size={19} />
+                  <h2 className="text-xl font-bold">구역 목록</h2>
+                </div>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Firebase에 저장된 구역 데이터입니다.
+                </p>
+
+                <Tabs defaultValue="전체" className="mt-4">
+                  <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
+                    {regions.map((region) => (
+                      <TabsTrigger
+                        key={region}
+                        value={region}
+                        onClick={() => {
+                          setSelectedRegion(region);
+                          setSelectedZones([]);
+                          setLastSelectedZoneId(null);
+                        }}
+                        className="shrink-0 rounded-xl px-4 text-sm font-semibold"
+                      >
+                        {region}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
               </div>
 
-              <p className="mt-1 text-sm text-slate-500">
-                Firebase에 저장된 구역 데이터입니다.
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={toggleAllFilteredZones}
+                  disabled={filteredZones.length === 0}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm disabled:opacity-50"
+                >
+                  {allFilteredSelected ? "전체 해제" : "전체 선택"}
+                </button>
 
-              <Tabs defaultValue="전체" className="mt-4">
-                <TabsList className="flex h-12 w-full overflow-x-auto rounded-2xl bg-slate-100 p-1">
-                  {regions.map((region) => (
-                    <TabsTrigger
-                      key={region}
-                      value={region}
-                      onClick={() => {
-                        setSelectedRegion(region);
-                        setSelectedZones([]);
-                        setLastSelectedZoneId(null);
-                      }}
-                      className="shrink-0 rounded-xl px-4 text-sm font-semibold"
-                    >
-                      {region}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            </div>
+                <button
+                  onClick={handleBulkVisitComplete}
+                  disabled={bulkCompleting || selectedZones.length === 0}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} />
+                  {bulkCompleting ? "처리 중..." : "선택 방문완료"}
+                </button>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={toggleAllFilteredZones}
-                disabled={filteredZones.length === 0}
-                className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm disabled:opacity-50"
-              >
-                {allFilteredSelected ? "전체 해제" : "전체 선택"}
-              </button>
+                <button
+                  onClick={handleBulkDeleteZones}
+                  disabled={bulkDeleting || selectedZones.length === 0}
+                  className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+                >
+                  <Trash2 size={16} />
+                  {bulkDeleting ? "삭제 중..." : "선택 삭제"}
+                </button>
 
-              <button
-                onClick={handleBulkVisitComplete}
-                disabled={bulkCompleting || selectedZones.length === 0}
-                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
-              >
-                <CheckCircle2 size={16} />
-                {bulkCompleting ? "처리 중..." : "선택 방문완료"}
-              </button>
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
+                  선택 {selectedZones.length}개
+                </div>
 
-              <button
-                onClick={handleBulkDeleteZones}
-                disabled={bulkDeleting || selectedZones.length === 0}
-                className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
-              >
-                <Trash2 size={16} />
-                {bulkDeleting ? "삭제 중..." : "선택 삭제"}
-              </button>
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
+                  총 {filteredZones.length}개
+                </div>
 
-              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
-                선택 {selectedZones.length}개
+                <Link
+                  href="/admin/zones/new"
+                  scroll={false}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
+                >
+                  <Plus size={16} />
+                  구역 추가
+                </Link>
               </div>
-
-              <div className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
-                총 {filteredZones.length}개
-              </div>
-
-              <Link
-                href="/admin/zones/new"
-                scroll={false}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
-              >
-                <Plus size={16} />
-                구역 추가
-              </Link>
             </div>
           </div>
 
