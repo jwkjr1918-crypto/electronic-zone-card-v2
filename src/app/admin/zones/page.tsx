@@ -664,7 +664,7 @@ export default function AdminZonesPage() {
         </section>
 
         <section className="rounded-3xl bg-white p-4 shadow sm:p-5">
-          <div className="sticky top-0 z-40 -mx-4 -mt-4 mb-4 rounded-t-3xl border-b border-slate-200 bg-white/95 p-4 backdrop-blur sm:-mx-5 sm:-mt-5 sm:p-5">
+          <div className="sticky top-[64px] z-40 -mx-4 -mt-4 mb-4 rounded-t-3xl border-b border-slate-200 bg-white/95 p-4 backdrop-blur sm:-mx-5 sm:-mt-5 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="flex items-center gap-2">
