@@ -120,7 +120,6 @@ function toDateTimeLocalValue(createdAt?: Timestamp | null) {
 
 export default function VisitsPage() {
   const lastSelectedLogIdRef = useRef<string | null>(null);
-  const shiftSelectPressedRef = useRef(false);
 
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,9 +268,15 @@ export default function VisitsPage() {
     setSelectedLogs((prev) => {
       const shouldCheck = nextChecked ?? !prev.includes(logId);
 
-      return shouldCheck
-        ? [...prev, logId]
-        : prev.filter((id) => id !== logId);
+      if (!shouldCheck) {
+        return prev.filter((id) => id !== logId);
+      }
+
+      if (prev.includes(logId)) {
+        return prev;
+      }
+
+      return [...prev, logId];
     });
   }
 
@@ -1147,22 +1152,17 @@ export default function VisitsPage() {
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    onPointerDown={(event) => {
-                                      shiftSelectPressedRef.current =
-                                        event.shiftKey;
-                                    }}
                                     onClick={(event) => {
-                                      shiftSelectPressedRef.current =
-                                        event.shiftKey;
-                                    }}
-                                    onChange={(event) => {
+                                      event.preventDefault();
+
                                       toggleLog(
                                         log.id,
-                                        shiftSelectPressedRef.current,
-                                        event.target.checked,
+                                        event.shiftKey,
+                                        !checked,
                                       );
-
-                                      shiftSelectPressedRef.current = false;
+                                    }}
+                                    onChange={() => {
+                                      // 선택은 onClick에서 직접 처리합니다.
                                     }}
                                     className="h-6 w-6 shrink-0 accent-red-500"
                                   />
