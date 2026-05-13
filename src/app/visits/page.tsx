@@ -19,6 +19,7 @@ import {
   deleteDoc,
   writeBatch,
   getDoc,
+  updateDoc,
   Timestamp,
 } from "firebase/firestore";
 
@@ -33,6 +34,9 @@ import {
   LogOut,
   User,
   FileText,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,9 +59,7 @@ const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 const VALID_VISIT_INTERVAL_MONTHS = 3;
 
 function normalizeRegion(region?: string) {
-  const normalized = String(region ?? "")
-    .trim()
-    .replace(/\s/g, "");
+  const normalized = String(region ?? "").trim().replace(/\s/g, "");
 
   if (normalized.includes("후포")) return "후포면";
   if (normalized.includes("평해")) return "평해읍";
@@ -91,6 +93,29 @@ function isAtLeastMonthsAfter(target: Date, base: Date, months: number) {
   return target.getTime() >= addMonths(base, months).getTime();
 }
 
+function sortVisitLogsDesc(logs: VisitLog[]) {
+  return [...logs].sort((a, b) => {
+    const aTime = a.createdAt?.seconds ?? 0;
+    const bTime = b.createdAt?.seconds ?? 0;
+
+    return bTime - aTime;
+  });
+}
+
+function toDateTimeLocalValue(createdAt?: Timestamp | null) {
+  const date = createdAt?.seconds
+    ? new Date(createdAt.seconds * 1000)
+    : new Date();
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
 export default function VisitsPage() {
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,6 +125,10 @@ export default function VisitsPage() {
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [generatingWord, setGeneratingWord] = useState(false);
+
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState("");
+  const [updatingDateId, setUpdatingDateId] = useState<string | null>(null);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
@@ -152,7 +181,7 @@ export default function VisitsPage() {
           ...visitDoc.data(),
         })) as VisitLog[];
 
-        setVisitLogs(logs);
+        setVisitLogs(sortVisitLogsDesc(logs));
       } catch (error) {
         console.error("방문 기록 조회 에러:", error);
       } finally {
@@ -239,6 +268,78 @@ export default function VisitsPage() {
 
         return Array.from(next);
       });
+    }
+  }
+
+  function startEditVisitDate(log: VisitLog) {
+    setEditingLogId(log.id);
+    setEditingDateValue(toDateTimeLocalValue(log.createdAt));
+  }
+
+  function cancelEditVisitDate() {
+    setEditingLogId(null);
+    setEditingDateValue("");
+  }
+
+  async function handleUpdateVisitDate(log: VisitLog) {
+    if (!editingDateValue) {
+      alert("수정할 방문 날짜를 선택해주세요.");
+      return;
+    }
+
+    const nextDate = new Date(editingDateValue);
+
+    if (Number.isNaN(nextDate.getTime())) {
+      alert("올바른 날짜가 아닙니다.");
+      return;
+    }
+
+    const ok = confirm(
+      `${log.zoneName} 방문완료 날짜를 수정할까요?\n\n${nextDate.toLocaleString(
+        "ko-KR",
+        {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      )}`
+    );
+
+    if (!ok) return;
+
+    try {
+      setUpdatingDateId(log.id);
+
+      const nextTimestamp = Timestamp.fromDate(nextDate);
+
+      await updateDoc(doc(db, "visitLogs", log.id), {
+        createdAt: nextTimestamp,
+      });
+
+      setVisitLogs((prev) =>
+        sortVisitLogsDesc(
+          prev.map((item) =>
+            item.id === log.id
+              ? {
+                  ...item,
+                  createdAt: nextTimestamp,
+                }
+              : item
+          )
+        )
+      );
+
+      setEditingLogId(null);
+      setEditingDateValue("");
+
+      alert("방문완료 날짜가 수정되었습니다.");
+    } catch (error) {
+      console.error("방문완료 날짜 수정 에러:", error);
+      alert("방문완료 날짜 수정 실패");
+    } finally {
+      setUpdatingDateId(null);
     }
   }
 
@@ -839,47 +940,104 @@ export default function VisitsPage() {
                       <div className="space-y-2">
                         {logs.map((log) => {
                           const checked = selectedLogs.includes(log.id);
+                          const isEditing = editingLogId === log.id;
 
                           return (
                             <div
                               key={log.id}
-                              className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${
+                              className={`rounded-xl px-3 py-2 ${
                                 checked
                                   ? "bg-red-100 ring-2 ring-red-300"
                                   : "bg-white"
                               }`}
                             >
-                              <div className="flex min-w-0 items-center gap-3 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleLog(log.id)}
-                                  className="h-6 w-6 shrink-0 accent-red-500"
-                                />
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleLog(log.id)}
+                                    className="h-6 w-6 shrink-0 accent-red-500"
+                                  />
 
-                                <div className="min-w-0">
-                                  {log.visitorName && (
-                                    <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
-                                      <User size={14} />
-                                      방문자: {log.visitorName}
+                                  <div className="min-w-0">
+                                    {log.visitorName && (
+                                      <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
+                                        <User size={14} />
+                                        방문자: {log.visitorName}
+                                      </div>
+                                    )}
+
+                                    <div className="flex items-center gap-1 text-slate-500">
+                                      <Clock3 size={14} />
+                                      {formatDate(log.createdAt)}
                                     </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                  {role === "admin" && (
+                                    <button
+                                      onClick={() => startEditVisitDate(log)}
+                                      disabled={updatingDateId === log.id}
+                                      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                                    >
+                                      <Pencil size={13} />
+                                      수정
+                                    </button>
                                   )}
 
-                                  <div className="flex items-center gap-1 text-slate-500">
-                                    <Clock3 size={14} />
-                                    {formatDate(log.createdAt)}
-                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteLog(log)}
+                                    disabled={deletingId === log.id}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                                  >
+                                    <Trash2 size={13} />
+                                    {deletingId === log.id ? "삭제 중" : "삭제"}
+                                  </button>
                                 </div>
                               </div>
 
-                              <button
-                                onClick={() => handleDeleteLog(log)}
-                                disabled={deletingId === log.id}
-                                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-red-500 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-                              >
-                                <Trash2 size={13} />
-                                {deletingId === log.id ? "삭제 중" : "삭제"}
-                              </button>
+                              {isEditing && (
+                                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                  <div className="mb-2 text-xs font-semibold text-slate-600">
+                                    방문완료 날짜 수정
+                                  </div>
+
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                    <input
+                                      type="datetime-local"
+                                      value={editingDateValue}
+                                      onChange={(event) =>
+                                        setEditingDateValue(event.target.value)
+                                      }
+                                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                    />
+
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => handleUpdateVisitDate(log)}
+                                        disabled={updatingDateId === log.id}
+                                        className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow disabled:opacity-50"
+                                      >
+                                        <Save size={15} />
+                                        {updatingDateId === log.id
+                                          ? "저장 중"
+                                          : "저장"}
+                                      </button>
+
+                                      <button
+                                        onClick={cancelEditVisitDate}
+                                        disabled={updatingDateId === log.id}
+                                        className="inline-flex items-center gap-1 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-600 shadow disabled:opacity-50"
+                                      >
+                                        <X size={15} />
+                                        취소
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
