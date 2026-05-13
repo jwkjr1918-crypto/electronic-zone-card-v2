@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Shield,
@@ -56,6 +56,8 @@ const THREE_MONTHS_AGO = () => {
   return date;
 };
 
+const HOME_STATE_KEY = "electronicZoneCardHomeState";
+
 type RegionGroup = "전체" | "후포지역" | "영해지역";
 
 type SortType = "todo" | "number" | "oldest";
@@ -78,6 +80,69 @@ interface VisitLogData {
 interface ActiveZoneView {
   zoneId?: string;
   expiresAt?: number;
+}
+
+interface HomePageState {
+  search?: string;
+  selectedRegionGroup?: RegionGroup;
+  selectedSubRegion?: string;
+  sortType?: SortType;
+  scrollY?: number;
+}
+
+function isRegionGroup(value: unknown): value is RegionGroup {
+  return value === "전체" || value === "후포지역" || value === "영해지역";
+}
+
+function isSortType(value: unknown): value is SortType {
+  return value === "todo" || value === "number" || value === "oldest";
+}
+
+function getSavedHomeState() {
+  if (typeof window === "undefined") return null;
+
+  const saved = sessionStorage.getItem(HOME_STATE_KEY);
+
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved) as HomePageState;
+  } catch (error) {
+    console.error("메인화면 상태 읽기 실패:", error);
+    return null;
+  }
+}
+
+function saveHomeState(state: HomePageState) {
+  if (typeof window === "undefined") return;
+
+  sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
+}
+
+function getInitialSearch() {
+  return getSavedHomeState()?.search ?? "";
+}
+
+function getInitialRegionGroup(): RegionGroup {
+  const saved = getSavedHomeState();
+
+  return isRegionGroup(saved?.selectedRegionGroup)
+    ? saved.selectedRegionGroup
+    : "전체";
+}
+
+function getInitialSubRegion() {
+  return getSavedHomeState()?.selectedSubRegion ?? "전체";
+}
+
+function getInitialSortType(): SortType {
+  const saved = getSavedHomeState();
+
+  return isSortType(saved?.sortType) ? saved.sortType : "todo";
+}
+
+function getInitialScrollY() {
+  return getSavedHomeState()?.scrollY ?? 0;
 }
 
 function getZoneNumber(zone: Zone) {
@@ -162,16 +227,20 @@ function sortTodoZones(zones: Zone[]) {
 }
 
 export default function Home() {
+  const restoredScrollRef = useRef(false);
+
+  const [initialScrollY] = useState(getInitialScrollY);
   const [zones, setZones] = useState<Zone[]>([]);
   const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(getInitialSearch);
 
   const [selectedRegionGroup, setSelectedRegionGroup] =
-    useState<RegionGroup>("전체");
+    useState<RegionGroup>(getInitialRegionGroup);
 
-  const [selectedSubRegion, setSelectedSubRegion] = useState("전체");
+  const [selectedSubRegion, setSelectedSubRegion] =
+    useState(getInitialSubRegion);
 
-  const [sortType, setSortType] = useState<SortType>("todo");
+  const [sortType, setSortType] = useState<SortType>(getInitialSortType);
 
   useEffect(() => {
     async function fetchZones() {
@@ -270,6 +339,59 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let animationFrameId = 0;
+
+    function saveCurrentState() {
+      window.cancelAnimationFrame(animationFrameId);
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        saveHomeState({
+          search,
+          selectedRegionGroup,
+          selectedSubRegion,
+          sortType,
+          scrollY: window.scrollY,
+        });
+      });
+    }
+
+    saveCurrentState();
+
+    window.addEventListener("scroll", saveCurrentState, {
+      passive: true,
+    });
+
+    window.addEventListener("pagehide", saveCurrentState);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("scroll", saveCurrentState);
+      window.removeEventListener("pagehide", saveCurrentState);
+    };
+  }, [search, selectedRegionGroup, selectedSubRegion, sortType]);
+
+  useEffect(() => {
+    if (restoredScrollRef.current) return;
+    if (zones.length === 0) return;
+
+    if (!initialScrollY || initialScrollY <= 0) {
+      restoredScrollRef.current = true;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      window.scrollTo(0, initialScrollY);
+      restoredScrollRef.current = true;
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [zones.length, initialScrollY]);
+
   const duplicateZoneIds = useMemo(() => {
     const countMap = new Map<number, number>();
 
@@ -337,6 +459,16 @@ export default function Home() {
 
     return [...baseFilteredZones].sort(sortByZoneNumber);
   }, [zones, search, selectedRegionGroup, selectedSubRegion, sortType]);
+
+  function saveStateBeforeNavigation() {
+    saveHomeState({
+      search,
+      selectedRegionGroup,
+      selectedSubRegion,
+      sortType,
+      scrollY: window.scrollY,
+    });
+  }
 
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-3 sm:px-4 sm:py-4">
@@ -483,7 +615,11 @@ export default function Home() {
             const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
 
             return (
-              <Link href={`/zone/${zone.firestoreId}`} key={zone.firestoreId}>
+              <Link
+                href={`/zone/${zone.firestoreId}`}
+                key={zone.firestoreId}
+                onClick={saveStateBeforeNavigation}
+              >
                 <Card
                   className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
                     isDuplicate
