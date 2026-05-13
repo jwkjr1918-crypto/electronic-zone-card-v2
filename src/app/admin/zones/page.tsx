@@ -24,6 +24,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   ClipboardList,
+  Hash,
   LogOut,
   MapPinned,
   Plus,
@@ -75,6 +76,7 @@ export default function AdminZonesPage() {
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
   const [bulkCompleting, setBulkCompleting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkUpdatingNumbers, setBulkUpdatingNumbers] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -298,13 +300,106 @@ export default function AdminZonesPage() {
       );
 
       alert("방문완료 처리되었습니다.");
-
       setSelectedZones([]);
     } catch (error) {
       console.error("다중 방문완료 에러:", error);
       alert("처리 실패");
     } finally {
       setBulkCompleting(false);
+    }
+  }
+
+  async function handleBulkUpdateZoneNumbers() {
+    if (selectedZones.length === 0) {
+      alert("선택된 구역이 없습니다.");
+      return;
+    }
+
+    const input = prompt(
+      "변경할 번호 값을 입력하세요.\n\n예시:\n+3 입력 → 기존 번호에서 3 증가\n-2 입력 → 기존 번호에서 2 감소"
+    );
+
+    if (!input) return;
+
+    const trimmedInput = input.trim();
+    const changeValue = Number(trimmedInput);
+
+    if (!Number.isInteger(changeValue)) {
+      alert("정수만 입력해주세요. 예: +3, -2, 10");
+      return;
+    }
+
+    if (changeValue === 0) {
+      alert("0은 변경할 수 없습니다.");
+      return;
+    }
+
+    const targetZones = zones.filter((zone) =>
+      selectedZones.includes(zone.firestoreId)
+    );
+
+    const invalidZone = targetZones.find(
+      (zone) => typeof zone.id !== "number" || Number.isNaN(zone.id)
+    );
+
+    if (invalidZone) {
+      alert(
+        `번호가 없는 구역이 포함되어 있습니다.\n${invalidZone.name} 구역을 먼저 확인해주세요.`
+      );
+      return;
+    }
+
+    const previewText = targetZones
+      .sort((a, b) => (a.id ?? 0) - (b.id ?? 0))
+      .slice(0, 8)
+      .map((zone) => `${zone.id}번 → ${(zone.id ?? 0) + changeValue}번`)
+      .join("\n");
+
+    const hasMore = targetZones.length > 8;
+
+    const ok = confirm(
+      `선택한 ${targetZones.length}개 구역 번호를 ${
+        changeValue > 0 ? `+${changeValue}` : changeValue
+      } 변경할까요?\n\n${previewText}${hasMore ? "\n..." : ""}`
+    );
+
+    if (!ok) return;
+
+    try {
+      setBulkUpdatingNumbers(true);
+
+      const batch = writeBatch(db);
+
+      targetZones.forEach((zone) => {
+        batch.update(doc(db, "zones", zone.firestoreId), {
+          id: (zone.id ?? 0) + changeValue,
+        });
+      });
+
+      await batch.commit();
+
+      const selectedSet = new Set(selectedZones);
+
+      setZones((prev) =>
+        [...prev]
+          .map((zone) =>
+            selectedSet.has(zone.firestoreId)
+              ? {
+                  ...zone,
+                  id: (zone.id ?? 0) + changeValue,
+                }
+              : zone
+          )
+          .sort((a, b) => (a.id ?? 0) - (b.id ?? 0))
+      );
+
+      alert("구역 번호가 변경되었습니다.");
+      setSelectedZones([]);
+    } catch (error) {
+      console.error("구역번호 일괄 변경 에러:", error);
+      alert("구역번호 변경 실패");
+    } finally {
+      setBulkUpdatingNumbers(false);
     }
   }
 
@@ -392,7 +487,7 @@ export default function AdminZonesPage() {
   if (role === "leader") return null;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-3 sm:p-4">
+    <main className="min-h-screen bg-slate-100 p-3 pb-28 sm:p-4 sm:pb-28">
       <div className="mx-auto max-w-5xl">
         <div className="mb-3 flex items-center justify-between gap-2">
           <Link
@@ -590,6 +685,30 @@ export default function AdminZonesPage() {
           )}
         </section>
       </div>
+
+      {selectedZones.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-2xl backdrop-blur sm:px-4">
+          <div className="mx-auto flex max-w-5xl items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-bold text-slate-900">
+                선택 {selectedZones.length}개
+              </div>
+              <div className="truncate text-xs text-slate-500">
+                선택한 구역의 번호를 +3, -2 방식으로 일괄 변경할 수 있습니다.
+              </div>
+            </div>
+
+            <button
+              onClick={handleBulkUpdateZoneNumbers}
+              disabled={bulkUpdatingNumbers}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow disabled:opacity-50"
+            >
+              <Hash size={16} />
+              {bulkUpdatingNumbers ? "변경 중..." : "구역번호 변경"}
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
