@@ -632,7 +632,7 @@ export default function AdminZonesPage() {
   return (
     <main className="min-h-screen bg-slate-100 p-3 pb-28 sm:p-4 sm:pb-28">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="sticky top-0 z-50 -mx-3 mb-3 flex items-center justify-between gap-2 bg-slate-100/95 px-3 py-2 backdrop-blur sm:-mx-4 sm:px-4">
           <Link
             href="/admin"
             className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
