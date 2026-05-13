@@ -257,16 +257,20 @@ export default function Home() {
 
     return [...filtered].sort((a, b) => {
       if (sortType === "oldest") {
-        const aTime =
-          a.lastVisitedAt?.seconds ?? 0;
+        const aVisited = Boolean(a.lastVisitedAt?.seconds);
+        const bVisited = Boolean(b.lastVisitedAt?.seconds);
 
-        const bTime =
-          b.lastVisitedAt?.seconds ?? 0;
+        if (!aVisited && !bVisited) {
+          return (a.id ?? 0) - (b.id ?? 0);
+        }
 
-        if (!a.lastVisitedAt?.seconds) return -1;
-        if (!b.lastVisitedAt?.seconds) return 1;
+        if (!aVisited) return -1;
+        if (!bVisited) return 1;
 
-        return aTime - bTime;
+        return (
+          (a.lastVisitedAt?.seconds ?? 0) -
+          (b.lastVisitedAt?.seconds ?? 0)
+        );
       }
 
       return (a.id ?? 0) - (b.id ?? 0);
