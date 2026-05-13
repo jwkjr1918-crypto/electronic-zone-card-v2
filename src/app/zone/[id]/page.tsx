@@ -31,7 +31,6 @@ import {
   RotateCw,
   Lock,
   Navigation,
-  Copy,
   ExternalLink,
 } from "lucide-react";
 
@@ -126,12 +125,6 @@ function getNaverMapUrl(zone: Zone, address: string) {
   )}`;
 }
 
-function getKakaoMapUrl(zone: Zone, address: string) {
-  return `https://map.kakao.com/link/search/${encodeURIComponent(
-    getFullAddress(zone, address)
-  )}`;
-}
-
 export default function ZoneDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -144,7 +137,6 @@ export default function ZoneDetailPage() {
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [savingVisit, setSavingVisit] = useState(false);
-  const [copyingAddress, setCopyingAddress] = useState<string | null>(null);
 
   const fromEvangelist = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -415,24 +407,6 @@ export default function ZoneDetailPage() {
     }
   }
 
-  async function handleCopyAddress(address: string) {
-    if (!zone) return;
-
-    const fullAddress = getFullAddress(zone, address);
-
-    try {
-      await navigator.clipboard.writeText(fullAddress);
-      setCopyingAddress(address);
-
-      window.setTimeout(() => {
-        setCopyingAddress(null);
-      }, 1200);
-    } catch (error) {
-      console.error("주소 복사 실패:", error);
-      alert("주소 복사 실패");
-    }
-  }
-
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-100 p-6">
@@ -510,51 +484,31 @@ export default function ZoneDetailPage() {
                     {addresses.map((address) => (
                       <div
                         key={address}
-                        className="rounded-xl bg-white p-3 text-slate-900"
+                        className="flex items-center gap-2 rounded-xl bg-white p-3 text-slate-900"
                       >
-                        <div className="mb-2 flex items-start gap-2">
-                          <MapPin
-                            size={16}
-                            className="mt-0.5 shrink-0 text-slate-500"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-bold">{address}</div>
-                            <div className="mt-0.5 text-[11px] text-slate-500">
-                              {getFullAddress(zone, address)}
-                            </div>
+                        <MapPin
+                          size={16}
+                          className="shrink-0 text-slate-500"
+                        />
+
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-bold">
+                            {address}
+                          </div>
+                          <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                            {getFullAddress(zone, address)}
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-1.5">
-                          <a
-                            href={getNaverMapUrl(zone, address)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2 py-2 text-xs font-bold text-white"
-                          >
-                            <ExternalLink size={12} />
-                            네이버
-                          </a>
-
-                          <a
-                            href={getKakaoMapUrl(zone, address)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-yellow-400 px-2 py-2 text-xs font-bold text-slate-900"
-                          >
-                            <ExternalLink size={12} />
-                            카카오
-                          </a>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCopyAddress(address)}
-                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-900 px-2 py-2 text-xs font-bold text-white"
-                          >
-                            <Copy size={12} />
-                            {copyingAddress === address ? "완료" : "복사"}
-                          </button>
-                        </div>
+                        <a
+                          href={getNaverMapUrl(zone, address)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
+                        >
+                          <ExternalLink size={12} />
+                          네이버
+                        </a>
                       </div>
                     ))}
                   </div>
