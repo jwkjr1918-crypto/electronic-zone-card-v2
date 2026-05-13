@@ -226,26 +226,28 @@ export default function VisitsPage() {
     }));
   }, [filteredLogs]);
 
-  const orderedFilteredLogIds = useMemo(() => {
-    return groupedLogs.flatMap((group) => group.logs.map((log) => log.id));
+  const orderedLatestLogIds = useMemo(() => {
+    return groupedLogs
+      .map((group) => group.latestLog?.id)
+      .filter(Boolean) as string[];
   }, [groupedLogs]);
 
   const allFilteredSelected =
-    filteredLogs.length > 0 &&
-    filteredLogs.every((log) => selectedLogs.includes(log.id));
+    orderedLatestLogIds.length > 0 &&
+    orderedLatestLogIds.every((id) => selectedLogs.includes(id));
 
   function toggleLog(logId: string, shiftKey = false, nextChecked?: boolean) {
     const previousLogId = lastSelectedLogIdRef.current;
     lastSelectedLogIdRef.current = logId;
 
     if (shiftKey && previousLogId && previousLogId !== logId) {
-      const previousIndex = orderedFilteredLogIds.indexOf(previousLogId);
-      const currentIndex = orderedFilteredLogIds.indexOf(logId);
+      const previousIndex = orderedLatestLogIds.indexOf(previousLogId);
+      const currentIndex = orderedLatestLogIds.indexOf(logId);
 
       if (previousIndex !== -1 && currentIndex !== -1) {
         const start = Math.min(previousIndex, currentIndex);
         const end = Math.max(previousIndex, currentIndex);
-        const rangeIds = orderedFilteredLogIds.slice(start, end + 1);
+        const rangeIds = orderedLatestLogIds.slice(start, end + 1);
 
         setSelectedLogs((prev) => {
           if (nextChecked === false) {
@@ -280,35 +282,20 @@ export default function VisitsPage() {
     });
   }
 
-  function toggleZoneLogs(logs: VisitLog[]) {
-    const zoneIds = logs.map((log) => log.id);
-    const allZoneSelected = zoneIds.every((id) => selectedLogs.includes(id));
-
-    if (allZoneSelected) {
-      setSelectedLogs((prev) => prev.filter((id) => !zoneIds.includes(id)));
-    } else {
-      setSelectedLogs((prev) => {
-        const next = new Set(prev);
-
-        zoneIds.forEach((id) => {
-          next.add(id);
-        });
-
-        return Array.from(next);
-      });
-    }
+  function toggleLatestLog(logId: string, shiftKey = false, nextChecked?: boolean) {
+    toggleLog(logId, shiftKey, nextChecked);
   }
 
   function toggleAllFilteredLogs() {
-    const filteredIds = filteredLogs.map((log) => log.id);
-
     if (allFilteredSelected) {
-      setSelectedLogs((prev) => prev.filter((id) => !filteredIds.includes(id)));
+      setSelectedLogs((prev) =>
+        prev.filter((id) => !orderedLatestLogIds.includes(id))
+      );
     } else {
       setSelectedLogs((prev) => {
         const next = new Set(prev);
 
-        filteredIds.forEach((id) => {
+        orderedLatestLogIds.forEach((id) => {
           next.add(id);
         });
 
@@ -1039,7 +1026,7 @@ export default function VisitsPage() {
           </div>
 
           <div className="text-xs text-slate-500">
-            Shift를 누른 채 체크하면 여러 개를 한 번에 선택할 수 있습니다.
+            각 구역의 가장 최근 방문기록 1개만 선택됩니다. Shift를 누른 채 체크하면 여러 구역을 한 번에 선택할 수 있습니다.
           </div>
             </div>
           </div>
@@ -1055,12 +1042,9 @@ export default function VisitsPage() {
           <div className="space-y-2">
             {groupedLogs.map(({ zoneName, logs, latestLog }) => {
               const isOpen = openZone === zoneName;
-              const selectedCount = logs.filter((log) =>
-                selectedLogs.includes(log.id),
-              ).length;
-              const allZoneSelected =
-                logs.length > 0 &&
-                logs.every((log) => selectedLogs.includes(log.id));
+              const latestSelected = selectedLogs.includes(latestLog.id);
+              const selectedCount = latestSelected ? 1 : 0;
+              const allZoneSelected = latestSelected;
 
               return (
                 <div
@@ -1073,9 +1057,20 @@ export default function VisitsPage() {
                     <input
                       type="checkbox"
                       checked={allZoneSelected}
-                      onChange={() => toggleZoneLogs(logs)}
+                      onClick={(event) => {
+                        event.preventDefault();
+
+                        toggleLatestLog(
+                          latestLog.id,
+                          event.shiftKey,
+                          !latestSelected,
+                        );
+                      }}
+                      onChange={() => {
+                        // 선택은 onClick에서 직접 처리합니다.
+                      }}
                       className="h-6 w-6 shrink-0 accent-red-500"
-                      aria-label={`${latestLog.zoneName} 방문기록 선택`}
+                      aria-label={`${latestLog.zoneName} 최근 방문기록 선택`}
                     />
 
                     <button
@@ -1135,6 +1130,7 @@ export default function VisitsPage() {
                     <div className="border-t border-slate-100 bg-slate-50 p-3">
                       <div className="space-y-2">
                         {logs.map((log) => {
+                          const isLatestLog = log.id === latestLog.id;
                           const checked = selectedLogs.includes(log.id);
                           const isEditing = editingLogId === log.id;
 
@@ -1152,10 +1148,13 @@ export default function VisitsPage() {
                                   <input
                                     type="checkbox"
                                     checked={checked}
+                                    disabled={!isLatestLog}
                                     onClick={(event) => {
                                       event.preventDefault();
 
-                                      toggleLog(
+                                      if (!isLatestLog) return;
+
+                                      toggleLatestLog(
                                         log.id,
                                         event.shiftKey,
                                         !checked,
@@ -1164,10 +1163,16 @@ export default function VisitsPage() {
                                     onChange={() => {
                                       // 선택은 onClick에서 직접 처리합니다.
                                     }}
-                                    className="h-6 w-6 shrink-0 accent-red-500"
+                                    className="h-6 w-6 shrink-0 accent-red-500 disabled:opacity-30"
                                   />
 
                                   <div className="min-w-0">
+                                    <div className="mb-1 text-[11px] font-semibold text-slate-400">
+                                      {isLatestLog
+                                        ? "선택 가능 · 가장 최근 기록"
+                                        : "이전 기록 · 개별 수정/삭제만 가능"}
+                                    </div>
+
                                     {log.visitorName && (
                                       <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
                                         <User size={14} />
