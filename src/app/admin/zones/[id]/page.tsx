@@ -109,15 +109,14 @@ function normalizeAddressText(text: string) {
     .replace(/[０-９]/g, (char) =>
       String.fromCharCode(char.charCodeAt(0) - 0xfee0)
     )
-    .replace(/\s+/g, " ")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
     .trim();
 }
 
 function extractAddressesFromText(text: string) {
   const normalizedText = normalizeAddressText(text);
-
-  const compactText = normalizedText.replace(/\s+/g, "");
-
   const found: string[] = [];
 
   function addAddress(address: string) {
@@ -136,19 +135,70 @@ function extractAddressesFromText(text: string) {
     }
   }
 
+  function cleanRoadLine(line: string) {
+    return line
+      .replace(/[^가-힣0-9]/g, "")
+      .replace(/대개로/g, "대게로")
+      .trim();
+  }
+
+  function cleanNumberLine(line: string) {
+    return line
+      .replace(/[^0-9-]/g, "")
+      .replace(/--+/g, "-")
+      .replace(/^-|-$/g, "")
+      .trim();
+  }
+
+  const roadPattern = /^[가-힣0-9]{1,18}(?:대로|번길|길|로)$/;
+  const numberPattern = /^\d{1,5}(?:-\d{1,5})?$/;
+
+  const rawLines = normalizedText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const compactLines = rawLines.map((line) => ({
+    raw: line,
+    road: cleanRoadLine(line),
+    number: cleanNumberLine(line),
+  }));
+
+  for (let index = 0; index < compactLines.length; index += 1) {
+    const current = compactLines[index];
+
+    if (!roadPattern.test(current.road)) continue;
+
+    for (
+      let nextIndex = index + 1;
+      nextIndex < Math.min(index + 4, compactLines.length);
+      nextIndex += 1
+    ) {
+      const next = compactLines[nextIndex];
+
+      if (numberPattern.test(next.number)) {
+        addAddress(`${current.road} ${next.number}`);
+        break;
+      }
+    }
+  }
+
+  const singleLineText = normalizedText.replace(/\n/g, " ");
+  const compactText = normalizedText.replace(/\s+/g, "");
+
   const normalPatterns = [
-    /[가-힣0-9]{1,12}(?:대로|번길|길|로)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
-    /[가-힣0-9]{1,12}(?:리|동)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
+    /[가-힣0-9]{1,18}(?:대로|번길|길|로)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
+    /[가-힣0-9]{1,18}(?:리|동)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
   ];
 
   normalPatterns.forEach((pattern) => {
-    const matches = normalizedText.match(pattern) || [];
+    const matches = singleLineText.match(pattern) || [];
     matches.forEach(addAddress);
   });
 
   const compactPatterns = [
-    /[가-힣0-9]{1,12}(?:대로|번길|길|로)\d{1,5}(?:-\d{1,5})?/g,
-    /[가-힣0-9]{1,12}(?:리|동)\d{1,5}(?:-\d{1,5})?/g,
+    /[가-힣0-9]{1,18}(?:대로|번길|길|로)\d{1,5}(?:-\d{1,5})?/g,
+    /[가-힣0-9]{1,18}(?:리|동)\d{1,5}(?:-\d{1,5})?/g,
   ];
 
   compactPatterns.forEach((pattern) => {
@@ -164,24 +214,8 @@ function extractAddressesFromText(text: string) {
     });
   });
 
-  const lines = normalizedText
-    .split(/\n|\.|,|\//)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (let index = 0; index < lines.length - 1; index += 1) {
-    const roadLine = lines[index].replace(/\s+/g, "");
-    const numberLine = lines[index + 1].replace(/\s+/g, "");
-
-    if (
-      /[가-힣0-9]{1,12}(?:대로|번길|길|로)$/.test(roadLine) &&
-      /^\d{1,5}(-\d{1,5})?$/.test(numberLine)
-    ) {
-      addAddress(`${roadLine} ${numberLine}`);
-    }
-  }
-
   console.log("OCR 원문:", text);
+  console.log("OCR 줄 목록:", rawLines);
   console.log("주소 추출 결과:", found);
 
   return found;
