@@ -415,7 +415,7 @@ export default function ZoneDetailPage() {
 
       if (fromEvangelist) {
         sessionStorage.removeItem("zoneEntryFrom");
-        router.push("/evangelist");
+        router.push("/");
       }
     } catch (error) {
       console.error("방문 기록 저장 에러:", error);

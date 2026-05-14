@@ -24,7 +24,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const handlePopState = () => {
-      router.push("/");
+      router.push("/leader");
     };
 
     window.history.pushState(null, "", window.location.href);
