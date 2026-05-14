@@ -14,6 +14,8 @@ import {
 
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   query,
   orderBy,
@@ -50,11 +52,13 @@ function normalizeRegion(region?: string) {
   return normalized;
 }
 
-const THREE_MONTHS_AGO = () => {
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
+
+function getMonthsAgo(months: number) {
   const date = new Date();
-  date.setMonth(date.getMonth() - 3);
+  date.setMonth(date.getMonth() - months);
   return date;
-};
+}
 
 const HOME_STATE_KEY = "electronicZoneCardLeaderState";
 
@@ -192,8 +196,8 @@ function sortOldestZones(a: Zone, b: Zone) {
   return sortByZoneNumber(a, b);
 }
 
-function sortTodoZones(zones: Zone[]) {
-  const cutoffDate = THREE_MONTHS_AGO();
+function sortTodoZones(zones: Zone[], visitLockMonths: number) {
+  const cutoffDate = getMonthsAgo(visitLockMonths);
 
   const todoZones = zones.filter(
     (zone) => !hasVisitRecord(zone) || isThreeMonthsPassed(zone, cutoffDate)
@@ -241,6 +245,33 @@ export default function LeaderPage() {
     useState(getInitialSubRegion);
 
   const [sortType, setSortType] = useState<SortType>(getInitialSortType);
+  const [visitLockMonths, setVisitLockMonths] = useState(
+    DEFAULT_VISIT_LOCK_MONTHS
+  );
+
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const settingsRef = doc(db, "settings", "global");
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          const months = Number(data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS);
+
+          setVisitLockMonths(
+            Number.isFinite(months) && months >= 0
+              ? months
+              : DEFAULT_VISIT_LOCK_MONTHS
+          );
+        }
+      } catch (error) {
+        console.error("방문완료 제한 설정 조회 에러:", error);
+      }
+    }
+
+    fetchSettings();
+  }, []);
 
   useEffect(() => {
     async function fetchZones() {
@@ -450,7 +481,7 @@ export default function LeaderPage() {
     });
 
     if (sortType === "todo") {
-      return sortTodoZones(baseFilteredZones);
+      return sortTodoZones(baseFilteredZones, visitLockMonths);
     }
 
     if (sortType === "oldest") {
@@ -458,7 +489,14 @@ export default function LeaderPage() {
     }
 
     return [...baseFilteredZones].sort(sortByZoneNumber);
-  }, [zones, search, selectedRegionGroup, selectedSubRegion, sortType]);
+  }, [
+    zones,
+    search,
+    selectedRegionGroup,
+    selectedSubRegion,
+    sortType,
+    visitLockMonths,
+  ]);
 
   function saveStateBeforeNavigation() {
     saveHomeState({
@@ -606,6 +644,9 @@ export default function LeaderPage() {
                 {filteredZones.length}
               </span>
               개 구역
+              <span className="ml-2 text-slate-400">
+                방문 제한 {visitLockMonths}개월
+              </span>
             </div>
           </div>
         </div>

@@ -9,6 +9,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 
 import {
   ArrowLeft,
+  Clock3,
   LogOut,
   Save,
   Settings,
@@ -26,6 +27,7 @@ export default function AdminSettingsPage() {
 
   const [loading, setLoading] = useState(true);
   const [bulkVisitorName, setBulkVisitorName] = useState("관리자");
+  const [visitLockMonths, setVisitLockMonths] = useState("3");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -84,12 +86,15 @@ export default function AdminSettingsPage() {
           const data = settingsSnap.data();
 
           setBulkVisitorName(data.bulkVisitorName || "관리자");
+          setVisitLockMonths(String(data.visitLockMonths ?? 3));
         } else {
           await setDoc(settingsRef, {
             bulkVisitorName: "관리자",
+            visitLockMonths: 3,
           });
 
           setBulkVisitorName("관리자");
+          setVisitLockMonths("3");
         }
       } catch (error) {
         console.error("설정 불러오기 에러:", error);
@@ -112,6 +117,13 @@ export default function AdminSettingsPage() {
       return;
     }
 
+    const months = Number(visitLockMonths);
+
+    if (!Number.isInteger(months) || months < 0 || months > 24) {
+      alert("방문완료 제한 기간은 0개월부터 24개월까지 입력할 수 있습니다.");
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -119,6 +131,7 @@ export default function AdminSettingsPage() {
         doc(db, "settings", "global"),
         {
           bulkVisitorName: trimmedName,
+          visitLockMonths: months,
         },
         {
           merge: true,
@@ -126,6 +139,7 @@ export default function AdminSettingsPage() {
       );
 
       setBulkVisitorName(trimmedName);
+      setVisitLockMonths(String(months));
 
       alert("설정이 저장되었습니다.");
     } catch (error) {
@@ -190,6 +204,57 @@ export default function AdminSettingsPage() {
           <p className="mt-2 text-sm text-slate-300">
             관리자 기능에 필요한 기본값을 관리합니다.
           </p>
+        </section>
+
+        <section className="mb-4 rounded-3xl bg-white p-5 shadow">
+          <div className="mb-5 flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100">
+              <Clock3 size={22} />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                방문완료 제한 기간
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                방문완료 후 다시 방문완료를 누를 수 없게 막는 기간입니다.
+                메인 화면의 방문할 곳 정렬에도 같이 적용됩니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">
+              제한 기간
+            </label>
+
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                max={24}
+                value={visitLockMonths}
+                onChange={(e) => setVisitLockMonths(e.target.value)}
+                placeholder="예: 3"
+                className="h-11 max-w-32 rounded-xl bg-slate-50 text-base"
+              />
+
+              <span className="text-sm font-semibold text-slate-700">
+                개월
+              </span>
+            </div>
+
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              현재 설정:{" "}
+              <span className="font-bold text-slate-900">
+                {visitLockMonths || "0"}개월
+              </span>
+              {Number(visitLockMonths) === 0
+                ? " · 방문완료 제한 없음"
+                : " · 이 기간이 지나야 다시 완료 가능"}
+            </div>
+          </div>
         </section>
 
         <section className="rounded-3xl bg-white p-5 shadow">

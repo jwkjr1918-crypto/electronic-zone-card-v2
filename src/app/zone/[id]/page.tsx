@@ -58,7 +58,7 @@ interface VisitLog {
 
 const ACTIVE_VIEW_EXPIRE_MS = 120000;
 const ACTIVE_VIEW_HEARTBEAT_MS = 30000;
-const VISIT_LOCK_MONTHS = 3;
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
 
 function getSessionViewId(zoneId: string) {
   const key = "activeZoneViewSessionId";
@@ -155,6 +155,9 @@ export default function ZoneDetailPage() {
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [savingVisit, setSavingVisit] = useState(false);
+  const [visitLockMonths, setVisitLockMonths] = useState(
+    DEFAULT_VISIT_LOCK_MONTHS
+  );
 
   const fromEvangelist = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -179,7 +182,7 @@ export default function ZoneDetailPage() {
     }
 
     const latestDate = new Date(recentVisit.createdAt.seconds * 1000);
-    const nextAvailableDate = addMonths(latestDate, VISIT_LOCK_MONTHS);
+    const nextAvailableDate = addMonths(latestDate, visitLockMonths);
     const now = new Date();
     const locked = now < nextAvailableDate;
 
@@ -195,7 +198,31 @@ export default function ZoneDetailPage() {
       nextAvailableDate,
       remainingDays,
     };
-  }, [recentVisit]);
+  }, [recentVisit, visitLockMonths]);
+
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const settingsRef = doc(db, "settings", "global");
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          const months = Number(data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS);
+
+          setVisitLockMonths(
+            Number.isFinite(months) && months >= 0
+              ? months
+              : DEFAULT_VISIT_LOCK_MONTHS
+          );
+        }
+      } catch (error) {
+        console.error("방문완료 제한 설정 조회 에러:", error);
+      }
+    }
+
+    fetchSettings();
+  }, []);
 
   useEffect(() => {
     async function fetchZone() {
@@ -383,7 +410,7 @@ export default function ZoneDetailPage() {
 
     if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
       alert(
-        `최근 방문완료 후 ${VISIT_LOCK_MONTHS}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
+        `최근 방문완료 후 ${visitLockMonths}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
           visitLockInfo.nextAvailableDate
         )}`
       );
@@ -542,7 +569,7 @@ export default function ZoneDetailPage() {
                 <div className="mt-5 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
                   <div className="flex items-center gap-2 font-bold">
                     <Lock size={16} />
-                    3개월 미만 재완료 제한
+                    {visitLockMonths}개월 미만 재완료 제한
                   </div>
                   <p className="mt-1">
                     다음 완료 가능일:{" "}
@@ -568,7 +595,7 @@ export default function ZoneDetailPage() {
                 {visitLockInfo.locked ? (
                   <>
                     <Lock size={20} />
-                    3개월 이후 완료 가능
+                    {visitLockMonths}개월 이후 완료 가능
                   </>
                 ) : (
                   <>
