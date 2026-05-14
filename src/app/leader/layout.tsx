@@ -28,6 +28,15 @@ export const metadata: Metadata = {
         type: "image/png",
       },
     ],
+
+    shortcut: [
+      {
+        url: "/leader-icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+      },
+    ],
+
     apple: [
       {
         url: "/leader-apple-touch-icon.png",
