@@ -18,12 +18,12 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: "/leader-icon-192.png",
+        url: "/leader-icon-192-safe.png",
         sizes: "192x192",
         type: "image/png",
       },
       {
-        url: "/leader-icon-512.png",
+        url: "/leader-icon-512-safe.png",
         sizes: "512x512",
         type: "image/png",
       },
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 
     shortcut: [
       {
-        url: "/leader-icon-192.png",
+        url: "/leader-icon-192-safe.png",
         sizes: "192x192",
         type: "image/png",
       },
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
 
     apple: [
       {
-        url: "/leader-apple-touch-icon.png",
+        url: "/leader-apple-touch-icon-safe.png",
         sizes: "180x180",
         type: "image/png",
       },
