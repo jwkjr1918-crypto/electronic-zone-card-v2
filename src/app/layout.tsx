@@ -2,10 +2,18 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "구역카드(인도자용)",
-  description: "영덕 전자구역 방문 관리 시스템",
+  title: "구역카드(전도인)",
+  description: "전도인용 구역 번호 바로가기",
   appleWebApp: {
-    title: "구역카드(인도자용)",
+    capable: true,
+    statusBarStyle: "default",
+    title: "구역카드(전도인)",
+  },
+  openGraph: {
+    title: "구역카드(전도인)",
+    description: "전도인용 구역 번호 바로가기",
+    siteName: "구역카드(전도인)",
+    type: "website",
   },
   icons: {
     icon: [
