@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "구역카드(전도인)",
   description: "전도인용 구역 번호 바로가기",
+  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

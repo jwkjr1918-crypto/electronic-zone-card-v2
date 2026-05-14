@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "후포회중구역카드",
-    short_name: "후포회중구역카드",
-    description: "후포 회중 구역 방문 관리 시스템",
+    name: "구역카드(전도인)",
+    short_name: "전도인용",
+    description: "전도인용 구역 번호 바로가기",
     id: "/",
     start_url: "/",
     scope: "/",
