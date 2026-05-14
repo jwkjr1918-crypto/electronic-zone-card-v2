@@ -1,6 +1,7 @@
+import { NextResponse } from "next/server";
+
 console.log("ENV TEST:", process.env.KAKAO_REST_API_KEY);
 
-import { NextResponse } from "next/server";
 
 type KakaoDocument = {
   x: string;

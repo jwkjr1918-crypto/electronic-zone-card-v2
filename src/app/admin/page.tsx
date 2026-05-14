@@ -67,7 +67,7 @@ export default function AdminPage() {
               "관리자만 접근 가능합니다."
             );
 
-            router.push("/");
+            router.push("/leader");
 
             return;
           }
@@ -81,7 +81,7 @@ export default function AdminPage() {
 
           alert("권한 확인 실패");
 
-          router.push("/");
+          router.push("/leader");
         }
       }
     );
