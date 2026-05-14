@@ -450,7 +450,7 @@ export default function ZoneDetailPage() {
       <main className="min-h-screen bg-slate-100 p-3 sm:p-4">
         <div className="mx-auto max-w-3xl">
           <Link
-            href={fromEvangelist ? "/evangelist" : "/"}
+            href={fromEvangelist ? "/" : "/leader"}
             className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
           >
             <ArrowLeft size={18} />
