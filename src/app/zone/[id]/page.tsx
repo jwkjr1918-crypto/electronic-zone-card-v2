@@ -158,6 +158,11 @@ export default function ZoneDetailPage() {
   const [visitLockMonths, setVisitLockMonths] = useState(
     DEFAULT_VISIT_LOCK_MONTHS
   );
+  const [allowedVisitorNames, setAllowedVisitorNames] = useState<string[]>([
+    "관리자",
+  ]);
+  const [selectingVisitor, setSelectingVisitor] = useState(false);
+  const [selectedVisitorName, setSelectedVisitorName] = useState("");
 
   const fromEvangelist = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -171,6 +176,10 @@ export default function ZoneDetailPage() {
   const addresses = useMemo(() => {
     return normalizeAddresses(zone?.addresses);
   }, [zone?.addresses]);
+
+  const visibleVisitorNames = useMemo(() => {
+    return allowedVisitorNames.filter((name) => name !== "관리자");
+  }, [allowedVisitorNames]);
 
   const visitLockInfo = useMemo(() => {
     if (!recentVisit?.createdAt?.seconds) {
@@ -214,6 +223,16 @@ export default function ZoneDetailPage() {
             Number.isFinite(months) && months >= 0
               ? months
               : DEFAULT_VISIT_LOCK_MONTHS
+          );
+
+          const names = Array.isArray(data.allowedVisitorNames)
+            ? data.allowedVisitorNames
+                .map((name: unknown) => String(name).trim())
+                .filter(Boolean)
+            : [];
+
+          setAllowedVisitorNames(
+            names.length > 0 ? Array.from(new Set(names)) : ["관리자"]
           );
         }
       } catch (error) {
@@ -405,22 +424,13 @@ export default function ZoneDetailPage() {
     }
   }
 
-  async function handleVisitLog() {
+  async function saveVisitLog(visitorName: string) {
     if (!zone || savingVisit) return;
 
-    if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
-      alert(
-        `최근 방문완료 후 ${visitLockMonths}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
-          visitLockInfo.nextAvailableDate
-        )}`
-      );
-      return;
-    }
+    const trimmedVisitorName = visitorName.trim();
 
-    const visitorName = prompt("인도자의 이름을 입력해주세요.");
-
-    if (!visitorName || visitorName.trim() === "") {
-      alert("이름을 입력해야 방문완료 처리할 수 있습니다.");
+    if (!allowedVisitorNames.includes(trimmedVisitorName)) {
+      alert("설정에서 허용된 인도자 이름만 사용할 수 있습니다.");
       return;
     }
 
@@ -432,11 +442,14 @@ export default function ZoneDetailPage() {
         zoneName: zone.name,
         zoneNumber: zone.id,
         region: zone.region,
-        visitorName: visitorName.trim(),
+        visitorName: trimmedVisitorName,
         createdAt: serverTimestamp(),
       });
 
-      alert(`${visitorName.trim()}님 이름으로 방문완료 처리되었습니다!`);
+      alert(`${trimmedVisitorName}님 이름으로 방문완료 처리되었습니다!`);
+
+      setSelectingVisitor(false);
+      setSelectedVisitorName("");
 
       await refreshRecentVisit();
 
@@ -450,6 +463,22 @@ export default function ZoneDetailPage() {
     } finally {
       setSavingVisit(false);
     }
+  }
+
+  function handleVisitLog() {
+    if (!zone || savingVisit) return;
+
+    if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
+      alert(
+        `최근 방문완료 후 ${visitLockMonths}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
+          visitLockInfo.nextAvailableDate
+        )}`
+      );
+      return;
+    }
+
+    setSelectedVisitorName("");
+    setSelectingVisitor(true);
   }
 
   if (loading) {
@@ -604,6 +633,72 @@ export default function ZoneDetailPage() {
                   </>
                 )}
               </button>
+
+              {selectingVisitor && !visitLockInfo.locked && (
+                <div className="mt-3 rounded-2xl bg-white/10 p-3">
+                  <div className="mb-2 text-sm font-bold text-white">
+                    인도자 이름을 먼저 선택해주세요
+                  </div>
+
+                  {visibleVisitorNames.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {visibleVisitorNames.map((name) => {
+                        const selected = selectedVisitorName === name;
+
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => setSelectedVisitorName(name)}
+                            disabled={savingVisit}
+                            className={`rounded-xl px-3 py-3 text-sm font-bold shadow transition active:scale-95 disabled:opacity-50 ${
+                              selected
+                                ? "bg-emerald-400 text-slate-950 ring-2 ring-white"
+                                : "bg-white text-slate-900 hover:bg-slate-200"
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-amber-100 px-3 py-3 text-sm font-bold text-amber-900">
+                      설정에서 인도자 이름을 먼저 추가해주세요.
+                    </div>
+                  )}
+
+                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm text-white">
+                    선택된 이름:{" "}
+                    <span className="font-bold">
+                      {selectedVisitorName || "아직 선택 안 됨"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectingVisitor(false);
+                        setSelectedVisitorName("");
+                      }}
+                      disabled={savingVisit}
+                      className="rounded-xl bg-white/10 px-3 py-3 text-sm font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
+                    >
+                      취소
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => saveVisitLog(selectedVisitorName)}
+                      disabled={savingVisit || !selectedVisitorName}
+                      className="rounded-xl bg-white px-3 py-3 text-sm font-bold text-slate-900 shadow transition hover:bg-slate-200 active:scale-95 disabled:opacity-50"
+                    >
+                      {savingVisit ? "저장 중..." : "최종 구역완료"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 

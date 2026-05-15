@@ -28,6 +28,8 @@ export default function AdminSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [bulkVisitorName, setBulkVisitorName] = useState("관리자");
   const [visitLockMonths, setVisitLockMonths] = useState("3");
+  const [allowedVisitorNamesText, setAllowedVisitorNamesText] =
+    useState("관리자");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -85,16 +87,29 @@ export default function AdminSettingsPage() {
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
 
+          const allowedVisitorNames = Array.isArray(data.allowedVisitorNames)
+            ? data.allowedVisitorNames
+                .map((name: unknown) => String(name).trim())
+                .filter(Boolean)
+            : [];
+
           setBulkVisitorName(data.bulkVisitorName || "관리자");
           setVisitLockMonths(String(data.visitLockMonths ?? 3));
+          setAllowedVisitorNamesText(
+            allowedVisitorNames.length > 0
+              ? allowedVisitorNames.join("\n")
+              : data.bulkVisitorName || "관리자"
+          );
         } else {
           await setDoc(settingsRef, {
             bulkVisitorName: "관리자",
             visitLockMonths: 3,
+            allowedVisitorNames: ["관리자"],
           });
 
           setBulkVisitorName("관리자");
           setVisitLockMonths("3");
+          setAllowedVisitorNamesText("관리자");
         }
       } catch (error) {
         console.error("설정 불러오기 에러:", error);
@@ -124,6 +139,27 @@ export default function AdminSettingsPage() {
       return;
     }
 
+    const allowedVisitorNames = Array.from(
+      new Set(
+        allowedVisitorNamesText
+          .split("\n")
+          .map((name) => name.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (allowedVisitorNames.length === 0) {
+      alert("허용할 인도자 이름을 최소 1명 이상 입력해주세요.");
+      return;
+    }
+
+    if (!allowedVisitorNames.includes(trimmedName)) {
+      alert(
+        "방문완료 기본 이름은 허용된 인도자 이름 목록에 포함되어야 합니다."
+      );
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -132,6 +168,7 @@ export default function AdminSettingsPage() {
         {
           bulkVisitorName: trimmedName,
           visitLockMonths: months,
+          allowedVisitorNames,
         },
         {
           merge: true,
@@ -140,6 +177,7 @@ export default function AdminSettingsPage() {
 
       setBulkVisitorName(trimmedName);
       setVisitLockMonths(String(months));
+      setAllowedVisitorNamesText(allowedVisitorNames.join("\n"));
 
       alert("설정이 저장되었습니다.");
     } catch (error) {
@@ -253,6 +291,44 @@ export default function AdminSettingsPage() {
               {Number(visitLockMonths) === 0
                 ? " · 방문완료 제한 없음"
                 : " · 이 기간이 지나야 다시 완료 가능"}
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-3xl bg-white p-5 shadow">
+          <div className="mb-5 flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100">
+              <User size={22} />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                허용할 인도자 이름
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                상세페이지에서 구역완료를 누를 때 선택할 수 있는 이름입니다.
+                여기에 없는 이름은 방문완료에 사용할 수 없습니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">
+              인도자 이름 목록
+            </label>
+
+            <textarea
+              value={allowedVisitorNamesText}
+              onChange={(e) => setAllowedVisitorNamesText(e.target.value)}
+              placeholder={"예:\n홍길동\n김철수\n이영희"}
+              rows={6}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base outline-none focus:border-slate-400"
+            />
+
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              한 줄에 한 명씩 입력해주세요. 중복된 이름은 저장할 때 자동으로
+              정리됩니다.
             </div>
           </div>
         </section>
