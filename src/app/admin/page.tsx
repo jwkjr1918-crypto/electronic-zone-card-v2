@@ -119,7 +119,7 @@ export default function AdminPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-3 flex items-center justify-between gap-2">
           <Link
-            href="/"
+            href="/leader"
             className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-medium shadow"
           >
             <ArrowLeft size={17} />

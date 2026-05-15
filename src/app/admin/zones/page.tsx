@@ -49,7 +49,7 @@ const regions = [
   "축산면",
 ];
 
-const VISIT_LOCK_MONTHS = 3;
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
 
 function normalizeRegion(region?: string) {
   const normalized = String(region ?? "")
@@ -92,21 +92,28 @@ function addMonths(date: Date, months: number) {
   return next;
 }
 
-function isVisitLocked(createdAt?: Timestamp | null) {
+function isVisitLocked(
+  createdAt: Timestamp | null | undefined,
+  visitLockMonths: number
+) {
   if (!createdAt?.seconds) return false;
+  if (visitLockMonths <= 0) return false;
 
   const latestDate = new Date(createdAt.seconds * 1000);
-  const nextAvailableDate = addMonths(latestDate, VISIT_LOCK_MONTHS);
+  const nextAvailableDate = addMonths(latestDate, visitLockMonths);
 
   return new Date() < nextAvailableDate;
 }
 
-function formatNextAvailableDate(createdAt?: Timestamp | null) {
+function formatNextAvailableDate(
+  createdAt: Timestamp | null | undefined,
+  visitLockMonths: number
+) {
   if (!createdAt?.seconds) return "";
 
   return addMonths(
     new Date(createdAt.seconds * 1000),
-    VISIT_LOCK_MONTHS
+    visitLockMonths
   ).toLocaleDateString("ko-KR", {
     year: "numeric",
     month: "2-digit",
@@ -131,6 +138,10 @@ export default function AdminZonesPage() {
   const [bulkCompleting, setBulkCompleting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkUpdatingNumbers, setBulkUpdatingNumbers] = useState(false);
+  const [bulkVisitorName, setBulkVisitorName] = useState("관리자");
+  const [visitLockMonths, setVisitLockMonths] = useState(
+    DEFAULT_VISIT_LOCK_MONTHS
+  );
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -177,6 +188,36 @@ export default function AdminZonesPage() {
       router.push("/visits");
     }
   }, [checkingAuth, role, router]);
+
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const settingsRef = doc(db, "settings", "global");
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          const months = Number(
+            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS
+          );
+
+          setVisitLockMonths(
+            Number.isFinite(months) && months >= 0
+              ? months
+              : DEFAULT_VISIT_LOCK_MONTHS
+          );
+
+          setBulkVisitorName(data.bulkVisitorName || "관리자");
+        }
+      } catch (error) {
+        console.error("설정 조회 에러:", error);
+      }
+    }
+
+    if (!checkingAuth && role === "admin") {
+      fetchSettings();
+    }
+  }, [checkingAuth, role]);
 
   useEffect(() => {
     async function fetchZones() {
@@ -284,7 +325,7 @@ export default function AdminZonesPage() {
   const lockedSelectedCount = zones.filter(
     (zone) =>
       selectedZones.includes(zone.firestoreId) &&
-      isVisitLocked(zone.lastVisitedAt)
+      isVisitLocked(zone.lastVisitedAt, visitLockMonths)
   ).length;
 
   const filteredZones = zones.filter((zone) => {
@@ -379,7 +420,7 @@ export default function AdminZonesPage() {
     );
 
     const lockedZones = targetZones.filter((zone) =>
-      isVisitLocked(zone.lastVisitedAt)
+      isVisitLocked(zone.lastVisitedAt, visitLockMonths)
     );
 
     if (lockedZones.length > 0) {
@@ -388,13 +429,14 @@ export default function AdminZonesPage() {
         .map(
           (zone) =>
             `${zone.id}번 ${zone.name} - ${formatNextAvailableDate(
-              zone.lastVisitedAt
+              zone.lastVisitedAt,
+              visitLockMonths
             )} 이후 가능`
         )
         .join("\n");
 
       alert(
-        `선택한 구역 중 ${lockedZones.length}개는 최근 방문완료 후 ${VISIT_LOCK_MONTHS}개월이 지나지 않았습니다.\n\n${preview}${
+        `선택한 구역 중 ${lockedZones.length}개는 최근 방문완료 후 ${visitLockMonths}개월이 지나지 않았습니다.\n\n${preview}${
           lockedZones.length > 5 ? "\n..." : ""
         }`
       );
@@ -416,7 +458,7 @@ export default function AdminZonesPage() {
             zoneName: zone.name,
             zoneNumber: zone.id,
             region: zone.region,
-            visitorName: "관리자",
+            visitorName: bulkVisitorName,
             createdAt: serverTimestamp(),
           })
         )
@@ -430,7 +472,7 @@ export default function AdminZonesPage() {
             ? {
                 ...zone,
                 lastVisitedAt: nowPlaceholder,
-                lastVisitorName: "관리자",
+                lastVisitorName: bulkVisitorName,
               }
             : zone
         )
@@ -679,7 +721,7 @@ export default function AdminZonesPage() {
                 </div>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Firebase에 저장된 구역 데이터입니다.
+                  Firebase에 저장된 구역 데이터입니다. 방문완료 제한 기간은 현재 {visitLockMonths}개월입니다.
                 </p>
 
                 {duplicateCount > 0 && (
@@ -695,7 +737,7 @@ export default function AdminZonesPage() {
                   <div className="mt-2 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     <Lock size={17} />
                     <span className="font-bold">
-                      선택 구역 중 {lockedSelectedCount}개는 3개월 미만으로
+                      선택 구역 중 {lockedSelectedCount}개는 {visitLockMonths}개월 미만으로
                       방문완료 불가
                     </span>
                   </div>
@@ -785,7 +827,7 @@ export default function AdminZonesPage() {
               {filteredZones.map((zone) => {
                 const checked = selectedZones.includes(zone.firestoreId);
                 const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
-                const locked = isVisitLocked(zone.lastVisitedAt);
+                const locked = isVisitLocked(zone.lastVisitedAt, visitLockMonths);
 
                 return (
                   <div
@@ -852,7 +894,7 @@ export default function AdminZonesPage() {
                           {locked && (
                             <div className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white">
                               <Lock size={11} />
-                              {formatNextAvailableDate(zone.lastVisitedAt)} 이후
+                              {formatNextAvailableDate(zone.lastVisitedAt, visitLockMonths)} 이후
                               완료 가능
                             </div>
                           )}
