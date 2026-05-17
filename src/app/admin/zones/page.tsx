@@ -562,7 +562,8 @@ export default function AdminZonesPage() {
   }
 
   async function toggleVisitLogsOpen(zone: Zone) {
-    const nextOpen = openVisitZoneId === zone.firestoreId ? null : zone.firestoreId;
+    const nextOpen =
+      openVisitZoneId === zone.firestoreId ? null : zone.firestoreId;
 
     setOpenVisitZoneId(nextOpen);
 
@@ -711,7 +712,6 @@ export default function AdminZonesPage() {
               zoneId: zone.firestoreId,
               zoneName: zone.name,
               zoneNumber: zone.id,
-              region: zone.region,
               visitorName: bulkVisitorName,
               createdAt: nowPlaceholder,
             },
