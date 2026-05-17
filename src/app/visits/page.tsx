@@ -1064,33 +1064,45 @@ export default function VisitsPage() {
               </TabsList>
             </Tabs>
 
-            <Tabs value={visitLogSortType} className="mb-3">
-              <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl bg-white p-1 shadow-sm">
-                <TabsTrigger
-                  value="latest"
+            <div className="mb-3 overflow-x-auto pb-1">
+              <div className="inline-flex min-w-max rounded-full bg-white p-1 shadow-sm">
+                <button
+                  type="button"
                   onClick={() => setVisitLogSortType("latest")}
-                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                    visitLogSortType === "latest"
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-500"
+                  }`}
                 >
                   최근순
-                </TabsTrigger>
+                </button>
 
-                <TabsTrigger
-                  value="oldest"
+                <button
+                  type="button"
                   onClick={() => setVisitLogSortType("oldest")}
-                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                    visitLogSortType === "oldest"
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-500"
+                  }`}
                 >
                   오래된순
-                </TabsTrigger>
+                </button>
 
-                <TabsTrigger
-                  value="zoneNumber"
+                <button
+                  type="button"
                   onClick={() => setVisitLogSortType("zoneNumber")}
-                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                    visitLogSortType === "zoneNumber"
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-500"
+                  }`}
                 >
                   구역번호순
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+                </button>
+              </div>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2">
           <button
