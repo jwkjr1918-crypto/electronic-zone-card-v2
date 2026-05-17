@@ -553,20 +553,21 @@ export default function LeaderPage() {
               </Link>
             </div>
 
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+            <div className="mb-4 flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-xl font-bold text-slate-900 sm:text-3xl">
                   후포회중 구역카드
                 </h1>
 
-                <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
+                <p className="mt-0.5 truncate text-[11px] text-slate-500 sm:text-sm">
                   후포회중구역 방문 관리 시스템
                 </p>
               </div>
 
-              <div className="rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
-                <div className="text-[11px] font-bold text-slate-700 sm:hidden">
-                  최근 6개월 {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
+              <div className="shrink-0 rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
+                <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
+                  최근6개월<br />
+                  {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
                   {recentSixMonthVisitPercent}%
                 </div>
 
