@@ -564,23 +564,30 @@ export default function LeaderPage() {
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px]">
-                <div className="text-[11px] font-semibold text-slate-500 sm:text-xs">
-                  최근 6개월 방문완료
-                </div>
-
-                <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
-                  {recentSixMonthVisitCount}
-                  <span className="mx-1 text-sm font-bold text-slate-400">
-                    /
-                  </span>
-                  <span className="text-sm font-bold text-slate-500">
-                    {TOTAL_ZONE_COUNT}
-                  </span>
-                </div>
-
-                <div className="text-xs font-bold text-emerald-700 sm:text-sm">
+              <div className="rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
+                <div className="text-[11px] font-bold text-slate-700 sm:hidden">
+                  최근 6개월 {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
                   {recentSixMonthVisitPercent}%
+                </div>
+
+                <div className="hidden sm:block">
+                  <div className="text-[11px] font-semibold text-slate-500 sm:text-xs">
+                    최근 6개월 방문완료
+                  </div>
+
+                  <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
+                    {recentSixMonthVisitCount}
+                    <span className="mx-1 text-sm font-bold text-slate-400">
+                      /
+                    </span>
+                    <span className="text-sm font-bold text-slate-500">
+                      {TOTAL_ZONE_COUNT}
+                    </span>
+                  </div>
+
+                  <div className="text-xs font-bold text-emerald-700 sm:text-sm">
+                    {recentSixMonthVisitPercent}%
+                  </div>
                 </div>
               </div>
             </div>
