@@ -53,6 +53,8 @@ function normalizeRegion(region?: string) {
 }
 
 const DEFAULT_VISIT_LOCK_MONTHS = 3;
+const TOTAL_ZONE_COUNT = 484;
+const RECENT_VISIT_MONTHS = 6;
 
 function getMonthsAgo(months: number) {
   const date = new Date();
@@ -200,7 +202,7 @@ function sortTodoZones(zones: Zone[], visitLockMonths: number) {
   const cutoffDate = getMonthsAgo(visitLockMonths);
 
   const todoZones = zones.filter(
-    (zone) => !hasVisitRecord(zone) || isThreeMonthsPassed(zone, cutoffDate)
+    (zone) => !hasVisitRecord(zone) || isThreeMonthsPassed(zone, cutoffDate),
   );
 
   const hasUnvisitedZone = zones.some((zone) => !hasVisitRecord(zone));
@@ -235,18 +237,20 @@ export default function LeaderPage() {
 
   const [initialScrollY] = useState(getInitialScrollY);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [recentSixMonthVisitCount, setRecentSixMonthVisitCount] = useState(0);
   const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
   const [search, setSearch] = useState(getInitialSearch);
 
-  const [selectedRegionGroup, setSelectedRegionGroup] =
-    useState<RegionGroup>(getInitialRegionGroup);
+  const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroup>(
+    getInitialRegionGroup,
+  );
 
   const [selectedSubRegion, setSelectedSubRegion] =
     useState(getInitialSubRegion);
 
   const [sortType, setSortType] = useState<SortType>(getInitialSortType);
   const [visitLockMonths, setVisitLockMonths] = useState(
-    DEFAULT_VISIT_LOCK_MONTHS
+    DEFAULT_VISIT_LOCK_MONTHS,
   );
 
   useEffect(() => {
@@ -257,12 +261,14 @@ export default function LeaderPage() {
 
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
-          const months = Number(data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS);
+          const months = Number(
+            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
+          );
 
           setVisitLockMonths(
             Number.isFinite(months) && months >= 0
               ? months
-              : DEFAULT_VISIT_LOCK_MONTHS
+              : DEFAULT_VISIT_LOCK_MONTHS,
           );
         }
       } catch (error) {
@@ -285,15 +291,24 @@ export default function LeaderPage() {
 
         const visitQuery = query(
           collection(db, "visitLogs"),
-          orderBy("createdAt", "desc")
+          orderBy("createdAt", "desc"),
         );
 
         const visitSnapshot = await getDocs(visitQuery);
 
         const latestVisitMap = new Map<string, Timestamp | null>();
+        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
+        let recentVisitCount = 0;
 
         visitSnapshot.docs.forEach((visitDoc) => {
           const log = visitDoc.data() as VisitLogData;
+
+          if (
+            log.createdAt?.seconds &&
+            log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()
+          ) {
+            recentVisitCount += 1;
+          }
 
           const keys = [
             log.zoneId ? String(log.zoneId) : null,
@@ -322,6 +337,7 @@ export default function LeaderPage() {
         });
 
         setZones(zoneDataWithVisit);
+        setRecentSixMonthVisitCount(recentVisitCount);
       } catch (error) {
         console.error("Firebase 에러:", error);
       }
@@ -340,10 +356,10 @@ export default function LeaderPage() {
         new Set(
           views
             .filter(
-              (view) => view.zoneId && view.expiresAt && view.expiresAt > now
+              (view) => view.zoneId && view.expiresAt && view.expiresAt > now,
             )
-            .map((view) => String(view.zoneId))
-        )
+            .map((view) => String(view.zoneId)),
+        ),
       );
 
       setActiveZoneIds(ids);
@@ -353,11 +369,11 @@ export default function LeaderPage() {
       collection(db, "activeZoneViews"),
       (snapshot) => {
         latestViews = snapshot.docs.map(
-          (viewDoc) => viewDoc.data() as ActiveZoneView
+          (viewDoc) => viewDoc.data() as ActiveZoneView,
         );
 
         updateActiveZones(latestViews);
-      }
+      },
     );
 
     const interval = window.setInterval(() => {
@@ -436,9 +452,9 @@ export default function LeaderPage() {
       zones
         .filter(
           (zone) =>
-            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1
+            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1,
         )
-        .map((zone) => zone.firestoreId)
+        .map((zone) => zone.firestoreId),
     );
   }, [zones]);
 
@@ -467,14 +483,16 @@ export default function LeaderPage() {
         matchesRegion =
           selectedSubRegion === "전체"
             ? HUPO_REGIONS.includes(normalizeRegion(zone.region))
-            : normalizeRegion(zone.region) === normalizeRegion(selectedSubRegion);
+            : normalizeRegion(zone.region) ===
+              normalizeRegion(selectedSubRegion);
       }
 
       if (selectedRegionGroup === "영해지역") {
         matchesRegion =
           selectedSubRegion === "전체"
             ? YEONGHAE_REGIONS.includes(normalizeRegion(zone.region))
-            : normalizeRegion(zone.region) === normalizeRegion(selectedSubRegion);
+            : normalizeRegion(zone.region) ===
+              normalizeRegion(selectedSubRegion);
       }
 
       return matchesSearch && matchesRegion;
@@ -497,6 +515,10 @@ export default function LeaderPage() {
     sortType,
     visitLockMonths,
   ]);
+
+  const recentSixMonthVisitPercent = Math.round(
+    (recentSixMonthVisitCount / TOTAL_ZONE_COUNT) * 100,
+  );
 
   function saveStateBeforeNavigation() {
     saveHomeState({
@@ -531,14 +553,36 @@ export default function LeaderPage() {
               </Link>
             </div>
 
-            <div className="mb-4">
-              <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-                후포회중 구역카드
-              </h1>
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+                  후포회중 구역카드
+                </h1>
 
-              <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
-                후포회중구역 방문 관리 시스템
-              </p>
+                <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">
+                  후포회중구역 방문 관리 시스템
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px]">
+                <div className="text-[11px] font-semibold text-slate-500 sm:text-xs">
+                  최근 6개월 방문완료
+                </div>
+
+                <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
+                  {recentSixMonthVisitCount}
+                  <span className="mx-1 text-sm font-bold text-slate-400">
+                    /
+                  </span>
+                  <span className="text-sm font-bold text-slate-500">
+                    {TOTAL_ZONE_COUNT}
+                  </span>
+                </div>
+
+                <div className="text-xs font-bold text-emerald-700 sm:text-sm">
+                  {recentSixMonthVisitPercent}%
+                </div>
+              </div>
             </div>
 
             {duplicateCount > 0 && (
@@ -777,7 +821,7 @@ export default function LeaderPage() {
                       >
                         {zone.lastVisitedAt?.seconds
                           ? new Date(
-                              zone.lastVisitedAt.seconds * 1000
+                              zone.lastVisitedAt.seconds * 1000,
                             ).toLocaleString("ko-KR", {
                               year: "numeric",
                               month: "2-digit",
