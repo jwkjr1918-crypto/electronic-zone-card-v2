@@ -85,6 +85,18 @@ interface VisitLog {
   createdAt?: Timestamp | null;
 }
 
+type VisitLogSortType = "latest" | "oldest" | "zoneNumber";
+
+function getLogSeconds(log?: VisitLog | null) {
+  return log?.createdAt?.seconds ?? 0;
+}
+
+function getLogZoneNumber(log?: VisitLog | null) {
+  return typeof log?.zoneNumber === "number"
+    ? log.zoneNumber
+    : Number.MAX_SAFE_INTEGER;
+}
+
 function addMonths(date: Date, months: number) {
   const next = new Date(date);
   next.setMonth(next.getMonth() + months);
@@ -140,6 +152,8 @@ export default function VisitsPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
   const [selectedRegion, setSelectedRegion] = useState("전체");
+  const [visitLogSortType, setVisitLogSortType] =
+    useState<VisitLogSortType>("latest");
 
   const router = useRouter();
 
@@ -242,12 +256,41 @@ export default function VisitsPage() {
       map.get(key)?.push(log);
     });
 
-    return Array.from(map.entries()).map(([zoneName, logs]) => ({
-      zoneName,
-      logs,
-      latestLog: logs[0],
-    }));
-  }, [filteredLogs]);
+    const groups = Array.from(map.entries()).map(([zoneName, logs]) => {
+      const sortedLogs = sortVisitLogsDesc(logs);
+
+      return {
+        zoneName,
+        logs: sortedLogs,
+        latestLog: sortedLogs[0],
+      };
+    });
+
+    return [...groups].sort((a, b) => {
+      if (visitLogSortType === "oldest") {
+        const timeDiff = getLogSeconds(a.latestLog) - getLogSeconds(b.latestLog);
+
+        if (timeDiff !== 0) return timeDiff;
+
+        return getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+      }
+
+      if (visitLogSortType === "zoneNumber") {
+        const numberDiff =
+          getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+
+        if (numberDiff !== 0) return numberDiff;
+
+        return a.zoneName.localeCompare(b.zoneName, "ko");
+      }
+
+      const timeDiff = getLogSeconds(b.latestLog) - getLogSeconds(a.latestLog);
+
+      if (timeDiff !== 0) return timeDiff;
+
+      return getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+    });
+  }, [filteredLogs, visitLogSortType]);
 
   const orderedLatestLogIds = useMemo(() => {
     return groupedLogs
@@ -1018,6 +1061,34 @@ export default function VisitsPage() {
                     {region}
                   </TabsTrigger>
                 ))}
+              </TabsList>
+            </Tabs>
+
+            <Tabs value={visitLogSortType} className="mb-3">
+              <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl bg-white p-1 shadow-sm">
+                <TabsTrigger
+                  value="latest"
+                  onClick={() => setVisitLogSortType("latest")}
+                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                >
+                  최근순
+                </TabsTrigger>
+
+                <TabsTrigger
+                  value="oldest"
+                  onClick={() => setVisitLogSortType("oldest")}
+                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                >
+                  오래된순
+                </TabsTrigger>
+
+                <TabsTrigger
+                  value="zoneNumber"
+                  onClick={() => setVisitLogSortType("zoneNumber")}
+                  className="rounded-xl px-3 py-2 text-sm font-semibold"
+                >
+                  구역번호순
+                </TabsTrigger>
               </TabsList>
             </Tabs>
 
