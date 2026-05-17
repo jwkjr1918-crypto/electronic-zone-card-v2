@@ -16,6 +16,7 @@ import {
   query,
   orderBy,
   writeBatch,
+  updateDoc,
   Timestamp,
 } from "firebase/firestore";
 
@@ -32,6 +33,13 @@ import {
   Trash2,
   TriangleAlert,
   Lock,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  Pencil,
+  Save,
+  X,
+  User,
 } from "lucide-react";
 
 import { db, auth } from "@/firebase/firebase";
@@ -121,6 +129,61 @@ function formatNextAvailableDate(
   });
 }
 
+function sortVisitLogsDesc(logs: VisitLog[]) {
+  return [...logs].sort((a, b) => {
+    const aTime = a.createdAt?.seconds ?? 0;
+    const bTime = b.createdAt?.seconds ?? 0;
+
+    return bTime - aTime;
+  });
+}
+
+function getZoneVisitLogs(zone: Zone, logs: VisitLog[]) {
+  return sortVisitLogsDesc(
+    logs.filter((log) => {
+      if (log.zoneId && log.zoneId === zone.firestoreId) return true;
+      if (
+        typeof log.zoneNumber === "number" &&
+        typeof zone.id === "number" &&
+        log.zoneNumber === zone.id
+      ) {
+        return true;
+      }
+      if (log.zoneName && log.zoneName === zone.name) return true;
+
+      return false;
+    })
+  );
+}
+
+function applyLatestVisitToZones(zones: Zone[], logs: VisitLog[]) {
+  return zones
+    .map((zone) => {
+      const latestLog = getZoneVisitLogs(zone, logs)[0];
+
+      return {
+        ...zone,
+        lastVisitedAt: latestLog?.createdAt || null,
+        lastVisitorName: latestLog?.visitorName,
+      };
+    })
+    .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+}
+
+function toDateTimeLocalValue(createdAt?: Timestamp | null) {
+  const date = createdAt?.seconds
+    ? new Date(createdAt.seconds * 1000)
+    : new Date();
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
 export default function AdminZonesPage() {
   const router = useRouter();
 
@@ -128,10 +191,23 @@ export default function AdminZonesPage() {
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
 
   const [zones, setZones] = useState<Zone[]>([]);
+  const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
   const [lastSelectedZoneId, setLastSelectedZoneId] = useState<string | null>(
+    null
+  );
+  const [openVisitZoneId, setOpenVisitZoneId] = useState<string | null>(null);
+  const [editingVisitLogId, setEditingVisitLogId] = useState<string | null>(
+    null
+  );
+  const [editingVisitorName, setEditingVisitorName] = useState("");
+  const [editingDateValue, setEditingDateValue] = useState("");
+  const [updatingVisitLogId, setUpdatingVisitLogId] = useState<string | null>(
+    null
+  );
+  const [deletingVisitLogId, setDeletingVisitLogId] = useState<string | null>(
     null
   );
 
@@ -236,41 +312,13 @@ export default function AdminZonesPage() {
 
         const visitSnapshot = await getDocs(visitQuery);
 
-        const latestVisitMap = new Map<
-          string,
-          {
-            createdAt?: Timestamp | null;
-            visitorName?: string;
-          }
-        >();
+        const allVisitLogs = visitSnapshot.docs.map((visitDoc) => ({
+          id: visitDoc.id,
+          ...visitDoc.data(),
+        })) as VisitLog[];
 
-        visitSnapshot.docs.forEach((visitDoc) => {
-          const log = {
-            id: visitDoc.id,
-            ...visitDoc.data(),
-          } as VisitLog;
-
-          if (log.zoneId && !latestVisitMap.has(log.zoneId)) {
-            latestVisitMap.set(log.zoneId, {
-              createdAt: log.createdAt || null,
-              visitorName: log.visitorName,
-            });
-          }
-        });
-
-        const zoneDataWithVisit = zoneData.map((zone) => {
-          const latestVisit = latestVisitMap.get(zone.firestoreId);
-
-          return {
-            ...zone,
-            lastVisitedAt: latestVisit?.createdAt || null,
-            lastVisitorName: latestVisit?.visitorName,
-          };
-        });
-
-        zoneDataWithVisit.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-
-        setZones(zoneDataWithVisit);
+        setVisitLogs(sortVisitLogsDesc(allVisitLogs));
+        setZones(applyLatestVisitToZones(zoneData, allVisitLogs));
       } catch (error) {
         console.error("관리자 구역 조회 에러:", error);
       } finally {
@@ -348,6 +396,121 @@ export default function AdminZonesPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  }
+
+  function startEditVisitLog(log: VisitLog) {
+    setEditingVisitLogId(log.id);
+    setEditingVisitorName(log.visitorName || "");
+    setEditingDateValue(toDateTimeLocalValue(log.createdAt));
+  }
+
+  function cancelEditVisitLog() {
+    setEditingVisitLogId(null);
+    setEditingVisitorName("");
+    setEditingDateValue("");
+  }
+
+  async function handleUpdateVisitLog(log: VisitLog) {
+    if (!editingDateValue) {
+      alert("수정할 방문 날짜를 선택해주세요.");
+      return;
+    }
+
+    const nextDate = new Date(editingDateValue);
+    const nextVisitorName = editingVisitorName.trim();
+
+    if (Number.isNaN(nextDate.getTime())) {
+      alert("올바른 날짜가 아닙니다.");
+      return;
+    }
+
+    if (!nextVisitorName) {
+      alert("방문자 이름을 입력해주세요.");
+      return;
+    }
+
+    const ok = confirm(
+      `방문기록을 수정할까요?\n\n방문자: ${nextVisitorName}\n날짜: ${nextDate.toLocaleString(
+        "ko-KR",
+        {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      )}`
+    );
+
+    if (!ok) return;
+
+    try {
+      setUpdatingVisitLogId(log.id);
+
+      const nextTimestamp = Timestamp.fromDate(nextDate);
+
+      await updateDoc(doc(db, "visitLogs", log.id), {
+        visitorName: nextVisitorName,
+        createdAt: nextTimestamp,
+      });
+
+      setVisitLogs((prev) => {
+        const nextLogs = sortVisitLogsDesc(
+          prev.map((item) =>
+            item.id === log.id
+              ? {
+                  ...item,
+                  visitorName: nextVisitorName,
+                  createdAt: nextTimestamp,
+                }
+              : item
+          )
+        );
+
+        setZones((prevZones) => applyLatestVisitToZones(prevZones, nextLogs));
+
+        return nextLogs;
+      });
+
+      cancelEditVisitLog();
+      alert("방문기록이 수정되었습니다.");
+    } catch (error) {
+      console.error("방문기록 수정 에러:", error);
+      alert("방문기록 수정 실패");
+    } finally {
+      setUpdatingVisitLogId(null);
+    }
+  }
+
+  async function handleDeleteVisitLog(log: VisitLog) {
+    const ok = confirm("이 방문기록을 삭제할까요?");
+
+    if (!ok) return;
+
+    try {
+      setDeletingVisitLogId(log.id);
+
+      await deleteDoc(doc(db, "visitLogs", log.id));
+
+      setVisitLogs((prev) => {
+        const nextLogs = prev.filter((item) => item.id !== log.id);
+
+        setZones((prevZones) => applyLatestVisitToZones(prevZones, nextLogs));
+
+        return nextLogs;
+      });
+
+      if (editingVisitLogId === log.id) {
+        cancelEditVisitLog();
+      }
+
+      alert("방문기록이 삭제되었습니다.");
+    } catch (error) {
+      console.error("방문기록 삭제 에러:", error);
+      alert("방문기록 삭제 실패");
+    } finally {
+      setDeletingVisitLogId(null);
+    }
   }
 
   function handleZoneSelect(zoneId: string, shiftKey: boolean) {
@@ -828,6 +991,8 @@ export default function AdminZonesPage() {
                 const checked = selectedZones.includes(zone.firestoreId);
                 const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
                 const locked = isVisitLocked(zone.lastVisitedAt, visitLockMonths);
+                const zoneVisitLogs = getZoneVisitLogs(zone, visitLogs);
+                const visitLogsOpen = openVisitZoneId === zone.firestoreId;
 
                 return (
                   <div
@@ -844,7 +1009,7 @@ export default function AdminZonesPage() {
                         handleZoneSelect(zone.firestoreId, event.shiftKey);
                       }
                     }}
-                    className={`flex cursor-pointer items-center justify-between gap-2 rounded-2xl px-3 py-2.5 transition sm:gap-3 sm:px-4 ${
+                    className={`cursor-pointer rounded-2xl px-3 py-2.5 transition sm:px-4 ${
                       isDuplicate
                         ? checked
                           ? "bg-red-50 ring-2 ring-red-300"
@@ -854,7 +1019,8 @@ export default function AdminZonesPage() {
                           : "bg-slate-50 hover:bg-slate-100"
                     }`}
                   >
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex items-center justify-between gap-2 sm:gap-3">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
                       <input
                         type="checkbox"
                         checked={checked}
@@ -917,31 +1083,185 @@ export default function AdminZonesPage() {
                       </div>
                     </div>
 
-                    <div
-                      className="flex shrink-0 gap-1.5"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <Link
-                        href={`/admin/zones/${zone.firestoreId}`}
-                        scroll={false}
-                        onClick={() => {
-                          sessionStorage.setItem(
-                            "lastEditedZoneId",
-                            zone.firestoreId
-                          );
-                        }}
-                        className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium shadow sm:px-3 sm:py-2 sm:text-sm"
+                      <div
+                        className="flex shrink-0 gap-1.5"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        수정
-                      </Link>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenVisitZoneId(
+                              visitLogsOpen ? null : zone.firestoreId
+                            )
+                          }
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white shadow sm:px-3 sm:py-2 sm:text-sm"
+                        >
+                          기록 {zoneVisitLogs.length}
+                          {visitLogsOpen ? (
+                            <ChevronUp size={13} />
+                          ) : (
+                            <ChevronDown size={13} />
+                          )}
+                        </button>
 
-                      <button
-                        onClick={() => handleDeleteZone(zone)}
-                        className="rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow sm:px-3 sm:py-2 sm:text-sm"
-                      >
-                        삭제
-                      </button>
+                        <Link
+                          href={`/admin/zones/${zone.firestoreId}`}
+                          scroll={false}
+                          onClick={() => {
+                            sessionStorage.setItem(
+                              "lastEditedZoneId",
+                              zone.firestoreId
+                            );
+                          }}
+                          className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium shadow sm:px-3 sm:py-2 sm:text-sm"
+                        >
+                          수정
+                        </Link>
+
+                        <button
+                          onClick={() => handleDeleteZone(zone)}
+                          className="rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white shadow sm:px-3 sm:py-2 sm:text-sm"
+                        >
+                          삭제
+                        </button>
+                      </div>
                     </div>
+
+                    {visitLogsOpen && (
+                      <div
+                        className="mt-3 rounded-2xl border border-slate-200 bg-white p-3"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-bold text-slate-700">
+                            방문기록 {zoneVisitLogs.length}개
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            방문자 이름과 날짜를 수정할 수 있습니다.
+                          </div>
+                        </div>
+
+                        {zoneVisitLogs.length === 0 ? (
+                          <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-400">
+                            방문기록이 없습니다.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {zoneVisitLogs.map((log) => {
+                              const isEditing = editingVisitLogId === log.id;
+
+                              return (
+                                <div
+                                  key={log.id}
+                                  className="rounded-xl border border-slate-100 bg-slate-50 p-3"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0 text-sm">
+                                      <div className="flex items-center gap-1 font-semibold text-slate-900">
+                                        <User size={14} />
+                                        {log.visitorName || "이름 없음"}
+                                      </div>
+
+                                      <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                                        <Clock3 size={13} />
+                                        {formatDate(log.createdAt)}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex shrink-0 gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => startEditVisitLog(log)}
+                                        disabled={updatingVisitLogId === log.id}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                                      >
+                                        <Pencil size={13} />
+                                        수정
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteVisitLog(log)}
+                                        disabled={deletingVisitLogId === log.id}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                                      >
+                                        <Trash2 size={13} />
+                                        {deletingVisitLogId === log.id
+                                          ? "삭제 중"
+                                          : "삭제"}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {isEditing && (
+                                    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                                      <div className="mb-2 text-xs font-bold text-slate-600">
+                                        방문 정보 수정
+                                      </div>
+
+                                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                        <input
+                                          type="text"
+                                          value={editingVisitorName}
+                                          onChange={(event) =>
+                                            setEditingVisitorName(
+                                              event.target.value
+                                            )
+                                          }
+                                          placeholder="방문자 이름"
+                                          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                        />
+
+                                        <input
+                                          type="datetime-local"
+                                          value={editingDateValue}
+                                          onChange={(event) =>
+                                            setEditingDateValue(
+                                              event.target.value
+                                            )
+                                          }
+                                          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                        />
+
+                                        <div className="flex gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleUpdateVisitLog(log)
+                                            }
+                                            disabled={
+                                              updatingVisitLogId === log.id
+                                            }
+                                            className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow disabled:opacity-50"
+                                          >
+                                            <Save size={15} />
+                                            {updatingVisitLogId === log.id
+                                              ? "저장 중"
+                                              : "저장"}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={cancelEditVisitLog}
+                                            disabled={
+                                              updatingVisitLogId === log.id
+                                            }
+                                            className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600 shadow disabled:opacity-50"
+                                          >
+                                            <X size={15} />
+                                            취소
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
