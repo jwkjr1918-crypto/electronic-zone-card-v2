@@ -15,6 +15,7 @@ import {
   getDoc,
   query,
   orderBy,
+  where,
   writeBatch,
   updateDoc,
   Timestamp,
@@ -138,37 +139,6 @@ function sortVisitLogsDesc(logs: VisitLog[]) {
   });
 }
 
-function getZoneVisitLogs(zone: Zone, logs: VisitLog[]) {
-  return sortVisitLogsDesc(
-    logs.filter((log) => {
-      if (log.zoneId && log.zoneId === zone.firestoreId) return true;
-      if (
-        typeof log.zoneNumber === "number" &&
-        typeof zone.id === "number" &&
-        log.zoneNumber === zone.id
-      ) {
-        return true;
-      }
-      if (log.zoneName && log.zoneName === zone.name) return true;
-
-      return false;
-    })
-  );
-}
-
-function applyLatestVisitToZones(zones: Zone[], logs: VisitLog[]) {
-  return zones
-    .map((zone) => {
-      const latestLog = getZoneVisitLogs(zone, logs)[0];
-
-      return {
-        ...zone,
-        lastVisitedAt: latestLog?.createdAt || null,
-        lastVisitorName: latestLog?.visitorName,
-      };
-    })
-    .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-}
 
 function toDateTimeLocalValue(createdAt?: Timestamp | null) {
   const date = createdAt?.seconds
@@ -191,7 +161,12 @@ export default function AdminZonesPage() {
   const [role, setRole] = useState<"admin" | "leader" | null>(null);
 
   const [zones, setZones] = useState<Zone[]>([]);
-  const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
+  const [visitLogsByZoneId, setVisitLogsByZoneId] = useState<
+    Record<string, VisitLog[]>
+  >({});
+  const [loadingVisitLogsByZoneId, setLoadingVisitLogsByZoneId] = useState<
+    Record<string, boolean>
+  >({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [selectedZones, setSelectedZones] = useState<string[]>([]);
@@ -305,20 +280,9 @@ export default function AdminZonesPage() {
           ...zoneDoc.data(),
         })) as Zone[];
 
-        const visitQuery = query(
-          collection(db, "visitLogs"),
-          orderBy("createdAt", "desc")
-        );
+        zoneData.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
 
-        const visitSnapshot = await getDocs(visitQuery);
-
-        const allVisitLogs = visitSnapshot.docs.map((visitDoc) => ({
-          id: visitDoc.id,
-          ...visitDoc.data(),
-        })) as VisitLog[];
-
-        setVisitLogs(sortVisitLogsDesc(allVisitLogs));
-        setZones(applyLatestVisitToZones(zoneData, allVisitLogs));
+        setZones(zoneData);
       } catch (error) {
         console.error("관리자 구역 조회 에러:", error);
       } finally {
@@ -410,7 +374,7 @@ export default function AdminZonesPage() {
     setEditingDateValue("");
   }
 
-  async function handleUpdateVisitLog(log: VisitLog) {
+  async function handleUpdateVisitLog(zone: Zone, log: VisitLog) {
     if (!editingDateValue) {
       alert("수정할 방문 날짜를 선택해주세요.");
       return;
@@ -454,9 +418,9 @@ export default function AdminZonesPage() {
         createdAt: nextTimestamp,
       });
 
-      setVisitLogs((prev) => {
+      setVisitLogsByZoneId((prev) => {
         const nextLogs = sortVisitLogsDesc(
-          prev.map((item) =>
+          (prev[zone.firestoreId] || []).map((item) =>
             item.id === log.id
               ? {
                   ...item,
@@ -467,9 +431,24 @@ export default function AdminZonesPage() {
           )
         );
 
-        setZones((prevZones) => applyLatestVisitToZones(prevZones, nextLogs));
+        const latestLog = nextLogs[0];
 
-        return nextLogs;
+        setZones((prevZones) =>
+          prevZones.map((item) =>
+            item.firestoreId === zone.firestoreId
+              ? {
+                  ...item,
+                  lastVisitedAt: latestLog?.createdAt || null,
+                  lastVisitorName: latestLog?.visitorName,
+                }
+              : item
+          )
+        );
+
+        return {
+          ...prev,
+          [zone.firestoreId]: nextLogs,
+        };
       });
 
       cancelEditVisitLog();
@@ -482,7 +461,7 @@ export default function AdminZonesPage() {
     }
   }
 
-  async function handleDeleteVisitLog(log: VisitLog) {
+  async function handleDeleteVisitLog(zone: Zone, log: VisitLog) {
     const ok = confirm("이 방문기록을 삭제할까요?");
 
     if (!ok) return;
@@ -492,12 +471,29 @@ export default function AdminZonesPage() {
 
       await deleteDoc(doc(db, "visitLogs", log.id));
 
-      setVisitLogs((prev) => {
-        const nextLogs = prev.filter((item) => item.id !== log.id);
+      setVisitLogsByZoneId((prev) => {
+        const nextLogs = (prev[zone.firestoreId] || []).filter(
+          (item) => item.id !== log.id
+        );
 
-        setZones((prevZones) => applyLatestVisitToZones(prevZones, nextLogs));
+        const latestLog = sortVisitLogsDesc(nextLogs)[0];
 
-        return nextLogs;
+        setZones((prevZones) =>
+          prevZones.map((item) =>
+            item.firestoreId === zone.firestoreId
+              ? {
+                  ...item,
+                  lastVisitedAt: latestLog?.createdAt || null,
+                  lastVisitorName: latestLog?.visitorName,
+                }
+              : item
+          )
+        );
+
+        return {
+          ...prev,
+          [zone.firestoreId]: nextLogs,
+        };
       });
 
       if (editingVisitLogId === log.id) {
@@ -510,6 +506,68 @@ export default function AdminZonesPage() {
       alert("방문기록 삭제 실패");
     } finally {
       setDeletingVisitLogId(null);
+    }
+  }
+
+  async function fetchVisitLogsForZone(zone: Zone) {
+    if (visitLogsByZoneId[zone.firestoreId]) return;
+
+    try {
+      setLoadingVisitLogsByZoneId((prev) => ({
+        ...prev,
+        [zone.firestoreId]: true,
+      }));
+
+      const visitQuery = query(
+        collection(db, "visitLogs"),
+        where("zoneId", "==", zone.firestoreId),
+        orderBy("createdAt", "desc")
+      );
+
+      const visitSnapshot = await getDocs(visitQuery);
+
+      const logs = visitSnapshot.docs.map((visitDoc) => ({
+        id: visitDoc.id,
+        ...visitDoc.data(),
+      })) as VisitLog[];
+
+      const sortedLogs = sortVisitLogsDesc(logs);
+      const latestLog = sortedLogs[0];
+
+      setVisitLogsByZoneId((prev) => ({
+        ...prev,
+        [zone.firestoreId]: sortedLogs,
+      }));
+
+      setZones((prevZones) =>
+        prevZones.map((item) =>
+          item.firestoreId === zone.firestoreId
+            ? {
+                ...item,
+                lastVisitedAt: latestLog?.createdAt || null,
+                lastVisitorName: latestLog?.visitorName,
+              }
+            : item
+        )
+      );
+    } catch (error) {
+      console.error("구역 방문기록 조회 에러:", error);
+      alert("방문기록을 불러오지 못했습니다.");
+    } finally {
+      setLoadingVisitLogsByZoneId((prev) => ({
+        ...prev,
+        [zone.firestoreId]: false,
+      }));
+    }
+  }
+
+  async function toggleVisitLogsOpen(zone: Zone) {
+    const nextOpen = openVisitZoneId === zone.firestoreId ? null : zone.firestoreId;
+
+    setOpenVisitZoneId(nextOpen);
+
+    if (nextOpen) {
+      await fetchVisitLogsForZone(zone);
     }
   }
 
@@ -640,6 +698,29 @@ export default function AdminZonesPage() {
             : zone
         )
       );
+
+      setVisitLogsByZoneId((prev) => {
+        const next = { ...prev };
+
+        targetZones.forEach((zone) => {
+          if (!next[zone.firestoreId]) return;
+
+          next[zone.firestoreId] = sortVisitLogsDesc([
+            {
+              id: `local-${Date.now()}-${zone.firestoreId}`,
+              zoneId: zone.firestoreId,
+              zoneName: zone.name,
+              zoneNumber: zone.id,
+              region: zone.region,
+              visitorName: bulkVisitorName,
+              createdAt: nowPlaceholder,
+            },
+            ...next[zone.firestoreId],
+          ]);
+        });
+
+        return next;
+      });
 
       alert("방문완료 처리되었습니다.");
       setSelectedZones([]);
@@ -991,8 +1072,10 @@ export default function AdminZonesPage() {
                 const checked = selectedZones.includes(zone.firestoreId);
                 const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
                 const locked = isVisitLocked(zone.lastVisitedAt, visitLockMonths);
-                const zoneVisitLogs = getZoneVisitLogs(zone, visitLogs);
+                const zoneVisitLogs = visitLogsByZoneId[zone.firestoreId] || [];
                 const visitLogsOpen = openVisitZoneId === zone.firestoreId;
+                const visitLogsLoading =
+                  loadingVisitLogsByZoneId[zone.firestoreId] || false;
 
                 return (
                   <div
@@ -1089,14 +1172,10 @@ export default function AdminZonesPage() {
                       >
                         <button
                           type="button"
-                          onClick={() =>
-                            setOpenVisitZoneId(
-                              visitLogsOpen ? null : zone.firestoreId
-                            )
-                          }
+                          onClick={() => toggleVisitLogsOpen(zone)}
                           className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white shadow sm:px-3 sm:py-2 sm:text-sm"
                         >
-                          기록 {zoneVisitLogs.length}
+                          기록 {visitLogsOpen ? zoneVisitLogs.length : ""}
                           {visitLogsOpen ? (
                             <ChevronUp size={13} />
                           ) : (
@@ -1141,7 +1220,11 @@ export default function AdminZonesPage() {
                           </div>
                         </div>
 
-                        {zoneVisitLogs.length === 0 ? (
+                        {visitLogsLoading ? (
+                          <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-400">
+                            방문기록 불러오는 중...
+                          </div>
+                        ) : zoneVisitLogs.length === 0 ? (
                           <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-400">
                             방문기록이 없습니다.
                           </div>
@@ -1181,7 +1264,7 @@ export default function AdminZonesPage() {
 
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteVisitLog(log)}
+                                        onClick={() => handleDeleteVisitLog(zone, log)}
                                         disabled={deletingVisitLogId === log.id}
                                         className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                                       >
@@ -1227,7 +1310,7 @@ export default function AdminZonesPage() {
                                           <button
                                             type="button"
                                             onClick={() =>
-                                              handleUpdateVisitLog(log)
+                                              handleUpdateVisitLog(zone, log)
                                             }
                                             disabled={
                                               updatingVisitLogId === log.id
