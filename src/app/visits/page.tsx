@@ -1055,7 +1055,7 @@ export default function VisitsPage() {
           </div>
 
           <div className="text-xs text-slate-500">
-            각 구역의 가장 최근 방문기록 1개만 선택됩니다. Shift를 누른 채 체크하면 여러 구역을 한 번에 선택할 수 있습니다.
+            상단 체크는 각 구역의 최근 기록과 연동됩니다. 펼친 뒤에는 이전 방문기록도 직접 선택할 수 있습니다. Shift를 누른 채 체크하면 여러 기록을 한 번에 선택할 수 있습니다.
           </div>
             </div>
           </div>
@@ -1172,24 +1172,21 @@ export default function VisitsPage() {
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    disabled={!isLatestLog}
                                     onChange={(event) => {
-                                      if (!isLatestLog) return;
-
-                                      toggleLatestLog(
+                                      toggleLog(
                                         log.id,
                                         shiftPressedRef.current,
                                         event.target.checked,
                                       );
                                     }}
-                                    className="h-6 w-6 shrink-0 accent-red-500 disabled:opacity-30"
+                                    className="h-6 w-6 shrink-0 accent-red-500"
                                   />
 
                                   <div className="min-w-0">
                                     <div className="mb-1 text-[11px] font-semibold text-slate-400">
                                       {isLatestLog
-                                        ? "선택 가능 · 가장 최근 기록"
-                                        : "이전 기록 · 개별 수정/삭제만 가능"}
+                                        ? "대표 기록 · 상단 체크와 연동"
+                                        : "이전 기록 · 직접 선택 가능"}
                                     </div>
 
                                     {log.visitorName && (
