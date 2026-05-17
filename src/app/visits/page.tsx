@@ -17,6 +17,8 @@ import {
   orderBy,
   doc,
   deleteDoc,
+  addDoc,
+  serverTimestamp,
   writeBatch,
   getDoc,
   updateDoc,
@@ -57,6 +59,7 @@ const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const TOTAL_ZONE_COUNT = 484;
 const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 const VALID_VISIT_INTERVAL_MONTHS = 3;
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
 
 function normalizeRegion(region?: string) {
   const normalized = String(region ?? "")
@@ -107,6 +110,54 @@ function isAtLeastMonthsAfter(target: Date, base: Date, months: number) {
   return target.getTime() >= addMonths(base, months).getTime();
 }
 
+function isVisitLocked(
+  createdAt: Timestamp | null | undefined,
+  visitLockMonths: number,
+) {
+  if (!createdAt?.seconds) return false;
+  if (visitLockMonths <= 0) return false;
+
+  const latestDate = new Date(createdAt.seconds * 1000);
+  const nextAvailableDate = addMonths(latestDate, visitLockMonths);
+
+  return new Date() < nextAvailableDate;
+}
+
+function formatNextAvailableDate(
+  createdAt: Timestamp | null | undefined,
+  visitLockMonths: number,
+) {
+  if (!createdAt?.seconds) return "";
+
+  return addMonths(
+    new Date(createdAt.seconds * 1000),
+    visitLockMonths,
+  ).toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function getVisitZoneKey(log: VisitLog) {
+  if (log.zoneId) return `id:${log.zoneId}`;
+  if (typeof log.zoneNumber === "number") return `number:${log.zoneNumber}`;
+  return `name:${log.zoneName}`;
+}
+
+function isSameZoneLog(a: VisitLog, b: VisitLog) {
+  if (a.zoneId && b.zoneId && a.zoneId === b.zoneId) return true;
+  if (
+    typeof a.zoneNumber === "number" &&
+    typeof b.zoneNumber === "number" &&
+    a.zoneNumber === b.zoneNumber
+  ) {
+    return true;
+  }
+
+  return Boolean(a.zoneName && b.zoneName && a.zoneName === b.zoneName);
+}
+
 function sortVisitLogsDesc(logs: VisitLog[]) {
   return [...logs].sort((a, b) => {
     const aTime = a.createdAt?.seconds ?? 0;
@@ -140,6 +191,7 @@ export default function VisitsPage() {
   const [openZone, setOpenZone] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
+  const [bulkCompleting, setBulkCompleting] = useState(false);
   const [updatingSelectedLogs, setUpdatingSelectedLogs] = useState(false);
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [generatingWord, setGeneratingWord] = useState(false);
@@ -154,6 +206,10 @@ export default function VisitsPage() {
   const [selectedRegion, setSelectedRegion] = useState("전체");
   const [visitLogSortType, setVisitLogSortType] =
     useState<VisitLogSortType>("latest");
+  const [bulkVisitorName, setBulkVisitorName] = useState("관리자");
+  const [visitLockMonths, setVisitLockMonths] = useState(
+    DEFAULT_VISIT_LOCK_MONTHS,
+  );
 
   const router = useRouter();
 
@@ -208,6 +264,36 @@ export default function VisitsPage() {
 
     return () => unsubscribe();
   }, [router]);
+
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        const settingsRef = doc(db, "settings", "global");
+        const settingsSnap = await getDoc(settingsRef);
+
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          const months = Number(
+            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
+          );
+
+          setVisitLockMonths(
+            Number.isFinite(months) && months >= 0
+              ? months
+              : DEFAULT_VISIT_LOCK_MONTHS,
+          );
+
+          setBulkVisitorName(data.bulkVisitorName || "관리자");
+        }
+      } catch (error) {
+        console.error("설정 조회 에러:", error);
+      }
+    }
+
+    if (!checkingAuth) {
+      fetchSettings();
+    }
+  }, [checkingAuth]);
 
   useEffect(() => {
     async function fetchVisitLogs() {
@@ -268,7 +354,8 @@ export default function VisitsPage() {
 
     return [...groups].sort((a, b) => {
       if (visitLogSortType === "oldest") {
-        const timeDiff = getLogSeconds(a.latestLog) - getLogSeconds(b.latestLog);
+        const timeDiff =
+          getLogSeconds(a.latestLog) - getLogSeconds(b.latestLog);
 
         if (timeDiff !== 0) return timeDiff;
 
@@ -348,14 +435,18 @@ export default function VisitsPage() {
     });
   }
 
-  function toggleLatestLog(logId: string, shiftKey = false, nextChecked?: boolean) {
+  function toggleLatestLog(
+    logId: string,
+    shiftKey = false,
+    nextChecked?: boolean,
+  ) {
     toggleLog(logId, shiftKey, nextChecked);
   }
 
   function toggleAllFilteredLogs() {
     if (allFilteredSelected) {
       setSelectedLogs((prev) =>
-        prev.filter((id) => !orderedLatestLogIds.includes(id))
+        prev.filter((id) => !orderedLatestLogIds.includes(id)),
       );
     } else {
       setSelectedLogs((prev) => {
@@ -471,6 +562,98 @@ export default function VisitsPage() {
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleBulkVisitComplete() {
+    if (selectedLogs.length === 0) {
+      alert("선택된 방문 기록이 없습니다.");
+      return;
+    }
+
+    const selectedLogItems = visitLogs.filter((log) =>
+      selectedLogs.includes(log.id),
+    );
+
+    const targetLogMap = new Map<string, VisitLog>();
+
+    selectedLogItems.forEach((log) => {
+      targetLogMap.set(getVisitZoneKey(log), log);
+    });
+
+    const targetLogs = Array.from(targetLogMap.values());
+
+    if (targetLogs.length === 0) {
+      alert("방문완료할 구역을 찾지 못했습니다.");
+      return;
+    }
+
+    const lockedLogs = targetLogs.filter((targetLog) => {
+      const latestLog = visitLogs.find((log) => isSameZoneLog(log, targetLog));
+      return isVisitLocked(latestLog?.createdAt, visitLockMonths);
+    });
+
+    if (lockedLogs.length > 0) {
+      const preview = lockedLogs
+        .slice(0, 5)
+        .map((log) => {
+          const latestLog = visitLogs.find((item) => isSameZoneLog(item, log));
+
+          return `${log.zoneNumber ?? ""} ${log.zoneName} - ${formatNextAvailableDate(
+            latestLog?.createdAt,
+            visitLockMonths,
+          )} 이후 가능`;
+        })
+        .join("\n");
+
+      alert(
+        `선택한 구역 중 ${lockedLogs.length}개는 최근 방문완료 후 ${visitLockMonths}개월이 지나지 않았습니다.\n\n${preview}${
+          lockedLogs.length > 5 ? "\n..." : ""
+        }`,
+      );
+      return;
+    }
+
+    const ok = confirm(
+      `선택한 ${targetLogs.length}개 구역을 방문완료 처리할까요?\n\n방문자 이름: ${bulkVisitorName}`,
+    );
+
+    if (!ok) return;
+
+    try {
+      setBulkCompleting(true);
+
+      await Promise.all(
+        targetLogs.map((log) =>
+          addDoc(collection(db, "visitLogs"), {
+            zoneId: log.zoneId || "",
+            zoneName: log.zoneName,
+            zoneNumber: log.zoneNumber,
+            region: log.region,
+            visitorName: bulkVisitorName,
+            createdAt: serverTimestamp(),
+          }),
+        ),
+      );
+
+      const nowPlaceholder = Timestamp.fromDate(new Date());
+      const localLogs = targetLogs.map((log) => ({
+        ...log,
+        id: `local-${Date.now()}-${log.id}`,
+        visitorName: bulkVisitorName,
+        createdAt: nowPlaceholder,
+      }));
+
+      setVisitLogs((prev) => sortVisitLogsDesc([...localLogs, ...prev]));
+      setSelectedLogs([]);
+      setOpenZone(null);
+
+      alert("방문완료 처리되었습니다.");
+    } catch (error) {
+      console.error("선택 구역 방문완료 에러:", error);
+      alert("방문완료 처리 실패");
+    } finally {
+      setBulkCompleting(false);
     }
   }
 
@@ -889,7 +1072,8 @@ export default function VisitsPage() {
 
         const zoneLogs = validLogsByZoneNumber.get(zoneNumber) || [];
 
-        const latestCompletedDate = zoneLogs.length > 0 ? zoneLogs[zoneLogs.length - 1].createdAt : null;
+        const latestCompletedDate =
+          zoneLogs.length > 0 ? zoneLogs[zoneLogs.length - 1].createdAt : null;
 
         setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
         setCellText(
@@ -1018,8 +1202,8 @@ export default function VisitsPage() {
                   <h1 className="text-2xl font-bold">방문 기록 관리</h1>
 
                   <p className="mt-1 text-sm text-slate-300">
-                    총 {visitLogs.length}개 기록 / 현재 {filteredLogs.length}개 표시
-                    / {groupedLogs.length}개 구역
+                    총 {visitLogs.length}개 기록 / 현재 {filteredLogs.length}개
+                    표시 / {groupedLogs.length}개 구역
                   </p>
                 </div>
 
@@ -1105,41 +1289,53 @@ export default function VisitsPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={toggleAllFilteredLogs}
-            disabled={filteredLogs.length === 0}
-            className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow disabled:opacity-50"
-          >
-            {allFilteredSelected ? "전체 해제" : "전체 선택"}
-          </button>
+              <button
+                onClick={toggleAllFilteredLogs}
+                disabled={filteredLogs.length === 0}
+                className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow disabled:opacity-50"
+              >
+                {allFilteredSelected ? "전체 해제" : "전체 선택"}
+              </button>
 
-          {role === "admin" && (
-            <button
-              onClick={handleUpdateSelectedLogs}
-              disabled={updatingSelectedLogs || selectedLogs.length === 0}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
-            >
-              <Pencil size={16} />
-              {updatingSelectedLogs ? "수정 중..." : "선택 수정"}
-            </button>
-          )}
+              {role === "admin" && (
+                <button
+                  onClick={handleBulkVisitComplete}
+                  disabled={bulkCompleting || selectedLogs.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+                >
+                  <ClipboardList size={16} />
+                  {bulkCompleting ? "처리 중..." : "선택 구역 방문완료"}
+                </button>
+              )}
 
-          <button
-            onClick={handleDeleteSelectedLogs}
-            disabled={deletingSelected || selectedLogs.length === 0}
-            className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
-          >
-            <Trash2 size={16} />
-            {deletingSelected ? "삭제 중..." : "선택 삭제"}
-          </button>
+              {role === "admin" && (
+                <button
+                  onClick={handleUpdateSelectedLogs}
+                  disabled={updatingSelectedLogs || selectedLogs.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+                >
+                  <Pencil size={16} />
+                  {updatingSelectedLogs ? "수정 중..." : "선택 수정"}
+                </button>
+              )}
 
-          <div className="rounded-full bg-white px-3 py-1 text-sm text-slate-500 shadow">
-            선택 {selectedLogs.length}개
-          </div>
+              <button
+                onClick={handleDeleteSelectedLogs}
+                disabled={deletingSelected || selectedLogs.length === 0}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
+              >
+                <Trash2 size={16} />
+                {deletingSelected ? "삭제 중..." : "선택 삭제"}
+              </button>
 
-          <div className="text-xs text-slate-500">
-            상단 체크는 각 구역의 최근 기록과 연동됩니다. 펼친 뒤에는 이전 방문기록도 직접 선택할 수 있습니다. Shift를 누른 채 체크하면 여러 기록을 한 번에 선택할 수 있습니다.
-          </div>
+              <div className="rounded-full bg-white px-3 py-1 text-sm text-slate-500 shadow">
+                선택 {selectedLogs.length}개
+              </div>
+
+              <div className="text-xs text-slate-500">
+                상단 체크는 각 구역의 최근 기록과 연동됩니다. 선택 후 방문완료를
+                누르면 해당 구역에 새 방문기록이 추가됩니다.
+              </div>
             </div>
           </div>
         </div>
