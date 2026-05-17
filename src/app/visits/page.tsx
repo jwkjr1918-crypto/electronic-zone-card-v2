@@ -716,25 +716,6 @@ export default function VisitsPage() {
     cell.appendChild(createTextParagraph(xmlDoc, text));
   }
 
-  function setCellLines(
-    xmlDoc: XMLDocument,
-    cell: Element | undefined,
-    lines: string[],
-  ) {
-    if (!cell) return;
-
-    clearCell(cell);
-
-    if (lines.length === 0) {
-      cell.appendChild(createTextParagraph(xmlDoc, ""));
-      return;
-    }
-
-    lines.forEach((line) => {
-      cell.appendChild(createTextParagraph(xmlDoc, line));
-    });
-  }
-
   function getValidThreeMonthLogs(logs: VisitLog[]) {
     const sortedLogs = [...logs]
       .filter((log) => Boolean(log.createdAt?.seconds))
@@ -769,6 +750,10 @@ export default function VisitsPage() {
     return validLogs;
   }
 
+  function getRecentFourValidLogsOldestFirst(logs: VisitLog[]) {
+    return getValidThreeMonthLogs(logs).slice(-4);
+  }
+
   function getValidLogsByZoneNumber() {
     const map = new Map<number, VisitLog[]>();
 
@@ -785,7 +770,7 @@ export default function VisitsPage() {
     const validMap = new Map<number, VisitLog[]>();
 
     map.forEach((logs, zoneNumber) => {
-      validMap.set(zoneNumber, getValidThreeMonthLogs(logs));
+      validMap.set(zoneNumber, getRecentFourValidLogsOldestFirst(logs));
     });
 
     return validMap;
@@ -861,22 +846,43 @@ export default function VisitsPage() {
 
         const zoneLogs = validLogsByZoneNumber.get(zoneNumber) || [];
 
-        const dates = zoneLogs.map((log) => formatWordDate(log.createdAt));
-        const visitorNames = zoneLogs.map((log) => log.visitorName || "");
+        const latestCompletedDate = zoneLogs.length > 0 ? zoneLogs[zoneLogs.length - 1].createdAt : null;
 
         setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
+        setCellText(
+          xmlDoc,
+          firstRowCells[1],
+          formatWordDate(latestCompletedDate),
+        );
 
-        setCellLines(xmlDoc, firstRowCells[1], dates);
-        setCellLines(xmlDoc, firstRowCells[2], visitorNames);
+        for (let index = 0; index < 4; index += 1) {
+          const log = zoneLogs[index];
+          const visitorNameCellIndex = 2 + index;
+          const assignedDateCellIndex = 2 + index * 2;
+          const completedDateCellIndex = assignedDateCellIndex + 1;
 
-        setCellLines(xmlDoc, secondRowCells[2], dates);
-        setCellLines(xmlDoc, secondRowCells[3], dates);
+          setCellText(
+            xmlDoc,
+            firstRowCells[visitorNameCellIndex],
+            log?.visitorName || "",
+          );
+          setCellText(
+            xmlDoc,
+            secondRowCells[assignedDateCellIndex],
+            formatWordDate(log?.createdAt),
+          );
+          setCellText(
+            xmlDoc,
+            secondRowCells[completedDateCellIndex],
+            formatWordDate(log?.createdAt),
+          );
+        }
 
-        for (let index = 3; index < firstRowCells.length; index += 1) {
+        for (let index = 6; index < firstRowCells.length; index += 1) {
           setCellText(xmlDoc, firstRowCells[index], "");
         }
 
-        for (let index = 4; index < secondRowCells.length; index += 1) {
+        for (let index = 10; index < secondRowCells.length; index += 1) {
           setCellText(xmlDoc, secondRowCells[index], "");
         }
 
