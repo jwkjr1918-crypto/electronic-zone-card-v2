@@ -171,6 +171,25 @@ function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
   return seconds * 1000 <= cutoffDate.getTime();
 }
 
+function getPassedMonths(zone: Zone) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return null;
+
+  const visitedDate = new Date(seconds * 1000);
+  const now = new Date();
+
+  let months =
+    (now.getFullYear() - visitedDate.getFullYear()) * 12 +
+    (now.getMonth() - visitedDate.getMonth());
+
+  if (now.getDate() < visitedDate.getDate()) {
+    months -= 1;
+  }
+
+  return Math.max(months, 0);
+}
+
 function sortByZoneNumber(a: Zone, b: Zone) {
   const numberDiff = getZoneNumber(a) - getZoneNumber(b);
 
@@ -709,6 +728,13 @@ export default function LeaderPage() {
             const isActive = activeZoneIds.includes(zone.firestoreId);
             const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
 
+            const passedMonths = getPassedMonths(zone);
+
+            const isVisitExpired =
+              isVisited &&
+              passedMonths !== null &&
+              passedMonths >= visitLockMonths;
+
             return (
               <Link
                 href={`/zone/${zone.firestoreId}`}
@@ -786,7 +812,7 @@ export default function LeaderPage() {
                               <Eye size={11} />
                               방문중
                             </>
-                          ) : isVisited ? (
+                          ) : isVisited && !isVisitExpired ? (
                             <>
                               <CheckCircle2 size={11} />
                               완료
@@ -798,6 +824,12 @@ export default function LeaderPage() {
                             </>
                           )}
                         </div>
+
+                        {isVisitExpired && passedMonths !== null && (
+                          <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
+                            {passedMonths}개월 지남
+                          </div>
+                        )}
                       </div>
                     </div>
 
