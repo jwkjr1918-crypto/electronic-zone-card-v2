@@ -19,6 +19,7 @@ import {
   getDocs,
   query,
   orderBy,
+  where,
   Timestamp,
   onSnapshot,
 } from "firebase/firestore";
@@ -164,6 +165,15 @@ function hasVisitRecord(zone: Zone) {
   return Boolean(zone.lastVisitedAt?.seconds);
 }
 
+function hasCachedVisitSummary(zone: Zone) {
+  const visitCount = Number(zone.visitCount ?? 0);
+
+  if (!Number.isFinite(visitCount)) return false;
+  if (visitCount <= 0) return true;
+
+  return Boolean(zone.lastVisitedAt?.seconds);
+}
+
 function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
   const seconds = getVisitedSeconds(zone);
 
@@ -235,8 +245,7 @@ function sortTodoZones(zones: Zone[], visitLockMonths: number) {
 
   const expiredZones = zones
     .filter(
-      (zone) =>
-        hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
+      (zone) => hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
     )
     .sort(sortByVisitCountThenZoneNumber);
 
@@ -300,6 +309,30 @@ export default function LeaderPage() {
           ...zoneDoc.data(),
         })) as Zone[];
 
+        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
+        const canUseCachedVisitSummary =
+          zoneData.length > 0 && zoneData.every(hasCachedVisitSummary);
+
+        if (canUseCachedVisitSummary) {
+          const recentVisitQuery = query(
+            collection(db, "visitLogs"),
+            where("createdAt", ">=", Timestamp.fromDate(recentVisitCutoffDate)),
+            orderBy("createdAt", "desc"),
+          );
+
+          const recentVisitSnapshot = await getDocs(recentVisitQuery);
+
+          setZones(
+            zoneData.map((zone) => ({
+              ...zone,
+              visitCount: Number(zone.visitCount ?? 0),
+            })),
+          );
+
+          setRecentSixMonthVisitCount(recentVisitSnapshot.size);
+          return;
+        }
+
         const visitQuery = query(
           collection(db, "visitLogs"),
           orderBy("createdAt", "desc"),
@@ -309,7 +342,6 @@ export default function LeaderPage() {
 
         const latestVisitMap = new Map<string, Timestamp | null>();
         const visitCountMap = new Map<string, number>();
-        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
         let recentVisitCount = 0;
 
         visitSnapshot.docs.forEach((visitDoc) => {
@@ -587,7 +619,8 @@ export default function LeaderPage() {
 
               <div className="shrink-0 rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
                 <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
-                  최근6개월<br />
+                  최근6개월
+                  <br />
                   {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
                   {recentSixMonthVisitPercent}%
                 </div>
