@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import JSZip from "jszip";
 
 import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -126,17 +125,7 @@ function collectImageUrls(data: Record<string, unknown>) {
   );
 }
 
-async function fetchImageBlob(url: string) {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error("이미지 다운로드 실패");
-  }
-
-  return response.blob();
-}
-
-function downloadBlob(blob: Blob, fileName: string) {
+function downloadFromObjectUrl(blob: Blob, fileName: string) {
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
@@ -149,19 +138,17 @@ function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
-async function downloadImageFromUrl(url: string, fileName: string) {
-  const blob = await fetchImageBlob(url);
+function downloadSingleImage(url: string, fileName: string) {
+  const link = document.createElement("a");
 
-  downloadBlob(blob, fileName);
-}
+  link.href = url;
+  link.download = sanitizeFileName(fileName);
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
 
-function getBackupZipFileName() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `구역이미지백업_${year}-${month}-${day}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export default function AdminSettingsPage() {
@@ -393,7 +380,7 @@ export default function AdminSettingsPage() {
   async function handleDownloadImage(item: ImageBackupItem) {
     try {
       setImageDownloading(true);
-      await downloadImageFromUrl(item.imageUrl, item.fileName);
+      downloadSingleImage(item.imageUrl, item.fileName);
     } catch (error) {
       console.error("이미지 다운로드 에러:", error);
       alert("이미지를 다운로드하지 못했습니다.");
@@ -416,30 +403,34 @@ export default function AdminSettingsPage() {
 
     try {
       setImageDownloading(true);
-      setImageDownloadProgress("ZIP 파일 준비 중...");
+      setImageDownloadProgress("서버에서 ZIP 파일 생성 중...");
 
-      const zip = new JSZip();
-
-      for (const [index, item] of imageBackups.entries()) {
-        setImageDownloadProgress(
-          `${index + 1}/${imageBackups.length} 이미지 추가 중...`,
-        );
-
-        const blob = await fetchImageBlob(item.imageUrl);
-        zip.file(item.fileName, blob);
-      }
-
-      setImageDownloadProgress("ZIP 파일 생성 중...");
-
-      const zipBlob = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: {
-          level: 6,
+      const response = await fetch("/api/image-backup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          images: imageBackups.map((item) => ({
+            imageUrl: item.imageUrl,
+            fileName: item.fileName,
+          })),
+        }),
       });
 
-      downloadBlob(zipBlob, getBackupZipFileName());
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "ZIP 파일 생성 실패");
+      }
+
+      const fileName =
+        response.headers
+          .get("Content-Disposition")
+          ?.match(/filename\\*=UTF-8''(.+)$/)?.[1] || "구역이미지백업.zip";
+
+      const zipBlob = await response.blob();
+
+      downloadFromObjectUrl(zipBlob, decodeURIComponent(fileName));
       setImageDownloadProgress("다운로드 완료");
     } catch (error) {
       console.error("전체 이미지 ZIP 다운로드 에러:", error);
@@ -646,7 +637,7 @@ export default function AdminSettingsPage() {
             </div>
 
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-              전체 다운로드는 구역번호 순서대로 ZIP 파일 하나에 담아 저장됩니다.
+              전체 다운로드는 서버에서 ZIP 파일 하나로 만든 뒤 저장됩니다.
               이미지가 많으면 ZIP 파일 생성에 시간이 조금 걸릴 수 있습니다.
             </div>
 
