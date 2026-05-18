@@ -74,6 +74,7 @@ interface Zone {
   name: string;
   region: string;
   lastVisitedAt?: Timestamp | null;
+  visitCount?: number;
 }
 
 interface VisitLogData {
@@ -217,38 +218,29 @@ function sortOldestZones(a: Zone, b: Zone) {
   return sortByZoneNumber(a, b);
 }
 
+function sortByVisitCountThenZoneNumber(a: Zone, b: Zone) {
+  const countDiff = (a.visitCount ?? 0) - (b.visitCount ?? 0);
+
+  if (countDiff !== 0) return countDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
 function sortTodoZones(zones: Zone[], visitLockMonths: number) {
   const cutoffDate = getMonthsAgo(visitLockMonths);
 
-  const todoZones = zones.filter(
-    (zone) => !hasVisitRecord(zone) || isThreeMonthsPassed(zone, cutoffDate),
-  );
+  const unvisitedZones = zones
+    .filter((zone) => !hasVisitRecord(zone))
+    .sort(sortByZoneNumber);
 
-  const hasUnvisitedZone = zones.some((zone) => !hasVisitRecord(zone));
+  const expiredZones = zones
+    .filter(
+      (zone) =>
+        hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
+    )
+    .sort(sortByVisitCountThenZoneNumber);
 
-  if (hasUnvisitedZone) {
-    return [...todoZones].sort(sortByZoneNumber);
-  }
-
-  const oldestZone = [...todoZones].sort(sortOldestZones)[0];
-
-  if (!oldestZone || typeof oldestZone.id !== "number") {
-    return [...todoZones].sort(sortByZoneNumber);
-  }
-
-  const startNumber = oldestZone.id;
-
-  return [...todoZones].sort((a, b) => {
-    const aNumber = getZoneNumber(a);
-    const bNumber = getZoneNumber(b);
-
-    const aGroup = aNumber >= startNumber ? 0 : 1;
-    const bGroup = bNumber >= startNumber ? 0 : 1;
-
-    if (aGroup !== bGroup) return aGroup - bGroup;
-
-    return sortByZoneNumber(a, b);
-  });
+  return [...unvisitedZones, ...expiredZones];
 }
 
 export default function LeaderPage() {
@@ -316,6 +308,7 @@ export default function LeaderPage() {
         const visitSnapshot = await getDocs(visitQuery);
 
         const latestVisitMap = new Map<string, Timestamp | null>();
+        const visitCountMap = new Map<string, number>();
         const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
         let recentVisitCount = 0;
 
@@ -336,6 +329,8 @@ export default function LeaderPage() {
           ].filter(Boolean) as string[];
 
           keys.forEach((key) => {
+            visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
+
             if (!latestVisitMap.has(key)) {
               latestVisitMap.set(key, log.createdAt || null);
             }
@@ -349,9 +344,16 @@ export default function LeaderPage() {
             latestVisitMap.get(zone.name) ||
             null;
 
+          const visitCount =
+            visitCountMap.get(zone.firestoreId) ||
+            visitCountMap.get(String(zone.id)) ||
+            visitCountMap.get(zone.name) ||
+            0;
+
           return {
             ...zone,
             lastVisitedAt: latestVisit,
+            visitCount,
           };
         });
 
