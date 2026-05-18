@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 
 import {
   ArrowLeft,
   Clock3,
+  Download,
+  FolderDown,
+  Image as ImageIcon,
   LogOut,
   Save,
   Settings,
@@ -18,6 +21,134 @@ import {
 
 import { db, auth } from "@/firebase/firebase";
 import { Input } from "@/components/ui/input";
+
+
+interface ImageBackupItem {
+  zoneDocId: string;
+  zoneNumber: number | null;
+  zoneName: string;
+  imageUrl: string;
+  fileName: string;
+  sortNumber: number;
+  imageIndex: number;
+}
+
+function getZoneNumberValue(value: unknown) {
+  const numberValue = Number(value);
+
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function sanitizeFileName(fileName: string) {
+  const cleaned = fileName
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned || "구역이미지.jpg";
+}
+
+function getFileNameFromUrl(url: string) {
+  try {
+    const parsedUrl = new URL(url);
+    const encodedPath = parsedUrl.pathname.split("/o/")[1]?.split("?")[0];
+
+    if (!encodedPath) return null;
+
+    const decodedPath = decodeURIComponent(encodedPath);
+    const fileName = decodedPath.split("/").pop();
+
+    return fileName ? sanitizeFileName(fileName) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getExtensionFromFileName(fileName: string) {
+  const match = fileName.match(/\.[a-zA-Z0-9]{2,5}$/);
+
+  return match ? match[0] : "";
+}
+
+function makeBackupFileName(
+  zoneNumber: number | null,
+  zoneName: string,
+  imageIndex: number,
+  imageUrl: string,
+) {
+  const originalFileName = getFileNameFromUrl(imageUrl);
+  const extension = originalFileName
+    ? getExtensionFromFileName(originalFileName)
+    : "";
+
+  if (originalFileName) {
+    return originalFileName;
+  }
+
+  const baseName =
+    zoneNumber !== null
+      ? `${zoneNumber}.${zoneName || "구역"}`
+      : zoneName || "구역이미지";
+
+  const suffix = imageIndex > 1 ? `_${imageIndex}` : "";
+
+  return sanitizeFileName(`${baseName}${suffix}${extension || ".jpg"}`);
+}
+
+function collectImageUrls(data: Record<string, unknown>) {
+  const candidateFields = [
+    data.imageUrl,
+    data.imageUrls,
+    data.image,
+    data.images,
+    data.photoUrl,
+    data.photoUrls,
+  ];
+
+  const urls = candidateFields.flatMap((value) => {
+    if (typeof value === "string") return [value];
+
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string");
+    }
+
+    return [];
+  });
+
+  return Array.from(
+    new Set(
+      urls
+        .map((url) => url.trim())
+        .filter((url) => url.startsWith("http")),
+    ),
+  );
+}
+
+async function downloadImageFromUrl(url: string, fileName: string) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error("이미지 다운로드 실패");
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = objectUrl;
+  link.download = sanitizeFileName(fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(objectUrl);
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 export default function AdminSettingsPage() {
   const router = useRouter();
@@ -31,6 +162,11 @@ export default function AdminSettingsPage() {
   const [allowedVisitorNamesText, setAllowedVisitorNamesText] =
     useState("관리자");
   const [saving, setSaving] = useState(false);
+
+  const [imageBackups, setImageBackups] = useState<ImageBackupItem[]>([]);
+  const [imageBackupLoading, setImageBackupLoading] = useState(false);
+  const [imageBackupLoaded, setImageBackupLoaded] = useState(false);
+  const [imageDownloading, setImageDownloading] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -188,6 +324,98 @@ export default function AdminSettingsPage() {
     }
   }
 
+
+  async function fetchImageBackups() {
+    try {
+      setImageBackupLoading(true);
+
+      const zoneSnapshot = await getDocs(collection(db, "zones"));
+
+      const backups = zoneSnapshot.docs
+        .flatMap((zoneDoc) => {
+          const data = zoneDoc.data() as Record<string, unknown>;
+          const zoneNumber = getZoneNumberValue(data.id);
+          const zoneName = String(data.name ?? "구역").trim();
+          const imageUrls = collectImageUrls(data);
+
+          return imageUrls.map((imageUrl, index) => ({
+            zoneDocId: zoneDoc.id,
+            zoneNumber,
+            zoneName,
+            imageUrl,
+            imageIndex: index + 1,
+            sortNumber: zoneNumber ?? Number.MAX_SAFE_INTEGER,
+            fileName: makeBackupFileName(
+              zoneNumber,
+              zoneName,
+              index + 1,
+              imageUrl,
+            ),
+          }));
+        })
+        .sort((a, b) => {
+          if (a.sortNumber !== b.sortNumber) {
+            return a.sortNumber - b.sortNumber;
+          }
+
+          if (a.zoneName !== b.zoneName) {
+            return a.zoneName.localeCompare(b.zoneName, "ko");
+          }
+
+          return a.imageIndex - b.imageIndex;
+        });
+
+      setImageBackups(backups);
+      setImageBackupLoaded(true);
+    } catch (error) {
+      console.error("이미지 백업 목록 조회 에러:", error);
+      alert("이미지 백업 목록을 불러오지 못했습니다.");
+    } finally {
+      setImageBackupLoading(false);
+    }
+  }
+
+  async function handleDownloadImage(item: ImageBackupItem) {
+    try {
+      setImageDownloading(true);
+      await downloadImageFromUrl(item.imageUrl, item.fileName);
+    } catch (error) {
+      console.error("이미지 다운로드 에러:", error);
+      alert("이미지를 다운로드하지 못했습니다.");
+    } finally {
+      setImageDownloading(false);
+    }
+  }
+
+  async function handleDownloadAllImages() {
+    if (imageBackups.length === 0) {
+      alert("다운로드할 이미지가 없습니다.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `이미지 ${imageBackups.length}개를 번호순으로 다운로드할까요?\n브라우저에서 여러 파일 다운로드 허용을 물어볼 수 있습니다.`,
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setImageDownloading(true);
+
+      for (const item of imageBackups) {
+        await downloadImageFromUrl(item.imageUrl, item.fileName);
+        await wait(350);
+      }
+    } catch (error) {
+      console.error("전체 이미지 다운로드 에러:", error);
+      alert(
+        "일부 이미지를 다운로드하지 못했습니다. 브라우저의 여러 파일 다운로드 허용 여부를 확인해주세요.",
+      );
+    } finally {
+      setImageDownloading(false);
+    }
+  }
+
   async function handleLogout() {
     try {
       await signOut(auth);
@@ -330,6 +558,105 @@ export default function AdminSettingsPage() {
               한 줄에 한 명씩 입력해주세요. 중복된 이름은 저장할 때 자동으로
               정리됩니다.
             </div>
+          </div>
+        </section>
+
+        <section className="mb-4 rounded-3xl bg-white p-5 shadow">
+          <div className="mb-5 flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100">
+              <ImageIcon size={22} />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                업로드 이미지 백업
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                구역 상세페이지에 업로드된 이미지를 컴퓨터에 저장합니다.
+                개별 다운로드와 전체 번호순 다운로드를 사용할 수 있습니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={fetchImageBackups}
+                disabled={imageBackupLoading || imageDownloading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm disabled:opacity-50"
+              >
+                <ImageIcon size={17} />
+                {imageBackupLoading ? "목록 불러오는 중..." : "이미지 목록 불러오기"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadAllImages}
+                disabled={
+                  imageDownloading ||
+                  imageBackupLoading ||
+                  imageBackups.length === 0
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+              >
+                <FolderDown size={17} />
+                {imageDownloading
+                  ? "다운로드 중..."
+                  : `전체 다운로드 (${imageBackups.length}개)`}
+              </button>
+            </div>
+
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              전체 다운로드는 구역번호 순서대로 진행됩니다. 이미지가 많으면
+              브라우저에서 여러 파일 다운로드 허용을 물어볼 수 있습니다.
+            </div>
+
+            {imageBackupLoaded && imageBackups.length === 0 && (
+              <div className="rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-700">
+                백업할 업로드 이미지가 없습니다.
+              </div>
+            )}
+
+            {imageBackups.length > 0 && (
+              <div className="max-h-[420px] space-y-2 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-2">
+                {imageBackups.map((item) => (
+                  <div
+                    key={`${item.zoneDocId}-${item.imageIndex}-${item.imageUrl}`}
+                    className="flex items-center gap-3 rounded-xl bg-white p-2 shadow-sm"
+                  >
+                    <img
+                      src={item.imageUrl}
+                      alt={item.fileName}
+                      className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-slate-100"
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-bold text-slate-900">
+                        {item.zoneNumber !== null
+                          ? `${item.zoneNumber}. ${item.zoneName}`
+                          : item.zoneName}
+                      </div>
+
+                      <div className="mt-0.5 truncate text-xs text-slate-500">
+                        {item.fileName}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadImage(item)}
+                      disabled={imageDownloading}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      <Download size={14} />
+                      다운로드
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
