@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -626,9 +627,11 @@ export default function AdminSettingsPage() {
                     key={`${item.zoneDocId}-${item.imageIndex}-${item.imageUrl}`}
                     className="flex items-center gap-3 rounded-xl bg-white p-2 shadow-sm"
                   >
-                    <img
+                    <Image
                       src={item.imageUrl}
                       alt={item.fileName}
+                      width={56}
+                      height={56}
                       className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-slate-100"
                     />
 
