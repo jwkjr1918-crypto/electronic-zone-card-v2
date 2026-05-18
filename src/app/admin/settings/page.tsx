@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import JSZip from "jszip";
 
 import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -125,14 +126,17 @@ function collectImageUrls(data: Record<string, unknown>) {
   );
 }
 
-async function downloadImageFromUrl(url: string, fileName: string) {
+async function fetchImageBlob(url: string) {
   const response = await fetch(url);
 
   if (!response.ok) {
     throw new Error("이미지 다운로드 실패");
   }
 
-  const blob = await response.blob();
+  return response.blob();
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
@@ -145,10 +149,19 @@ async function downloadImageFromUrl(url: string, fileName: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
+async function downloadImageFromUrl(url: string, fileName: string) {
+  const blob = await fetchImageBlob(url);
+
+  downloadBlob(blob, fileName);
+}
+
+function getBackupZipFileName() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+
+  return `구역이미지백업_${year}-${month}-${day}.zip`;
 }
 
 export default function AdminSettingsPage() {
@@ -168,6 +181,7 @@ export default function AdminSettingsPage() {
   const [imageBackupLoading, setImageBackupLoading] = useState(false);
   const [imageBackupLoaded, setImageBackupLoaded] = useState(false);
   const [imageDownloading, setImageDownloading] = useState(false);
+  const [imageDownloadProgress, setImageDownloadProgress] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -395,25 +409,47 @@ export default function AdminSettingsPage() {
     }
 
     const confirmed = window.confirm(
-      `이미지 ${imageBackups.length}개를 번호순으로 다운로드할까요?\n브라우저에서 여러 파일 다운로드 허용을 물어볼 수 있습니다.`,
+      `이미지 ${imageBackups.length}개를 ZIP 파일 하나로 다운로드할까요?`,
     );
 
     if (!confirmed) return;
 
     try {
       setImageDownloading(true);
+      setImageDownloadProgress("ZIP 파일 준비 중...");
 
-      for (const item of imageBackups) {
-        await downloadImageFromUrl(item.imageUrl, item.fileName);
-        await wait(350);
+      const zip = new JSZip();
+
+      for (const [index, item] of imageBackups.entries()) {
+        setImageDownloadProgress(
+          `${index + 1}/${imageBackups.length} 이미지 추가 중...`,
+        );
+
+        const blob = await fetchImageBlob(item.imageUrl);
+        zip.file(item.fileName, blob);
       }
+
+      setImageDownloadProgress("ZIP 파일 생성 중...");
+
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 6,
+        },
+      });
+
+      downloadBlob(zipBlob, getBackupZipFileName());
+      setImageDownloadProgress("다운로드 완료");
     } catch (error) {
-      console.error("전체 이미지 다운로드 에러:", error);
-      alert(
-        "일부 이미지를 다운로드하지 못했습니다. 브라우저의 여러 파일 다운로드 허용 여부를 확인해주세요.",
-      );
+      console.error("전체 이미지 ZIP 다운로드 에러:", error);
+      alert("이미지 ZIP 파일을 만들지 못했습니다.");
     } finally {
       setImageDownloading(false);
+
+      window.setTimeout(() => {
+        setImageDownloadProgress("");
+      }, 1500);
     }
   }
 
@@ -604,15 +640,21 @@ export default function AdminSettingsPage() {
               >
                 <FolderDown size={17} />
                 {imageDownloading
-                  ? "다운로드 중..."
-                  : `전체 다운로드 (${imageBackups.length}개)`}
+                  ? "ZIP 생성 중..."
+                  : `전체 ZIP 다운로드 (${imageBackups.length}개)`}
               </button>
             </div>
 
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-              전체 다운로드는 구역번호 순서대로 진행됩니다. 이미지가 많으면
-              브라우저에서 여러 파일 다운로드 허용을 물어볼 수 있습니다.
+              전체 다운로드는 구역번호 순서대로 ZIP 파일 하나에 담아 저장됩니다.
+              이미지가 많으면 ZIP 파일 생성에 시간이 조금 걸릴 수 있습니다.
             </div>
+
+            {imageDownloadProgress && (
+              <div className="rounded-2xl bg-blue-50 p-4 text-sm font-semibold text-blue-700">
+                {imageDownloadProgress}
+              </div>
+            )}
 
             {imageBackupLoaded && imageBackups.length === 0 && (
               <div className="rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-700">
