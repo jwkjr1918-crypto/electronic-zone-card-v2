@@ -242,6 +242,15 @@ function sortByVisitCountThenZoneNumber(a: Zone, b: Zone) {
   return sortByZoneNumber(a, b);
 }
 
+function sortByRecentVisit(a: Zone, b: Zone) {
+  const visitedDiff =
+    (b.lastVisitedAt?.seconds ?? 0) - (a.lastVisitedAt?.seconds ?? 0);
+
+  if (visitedDiff !== 0) return visitedDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
 function sortTodoZones(zones: Zone[], visitLockMonths: number) {
   const cutoffDate = getMonthsAgo(visitLockMonths);
 
@@ -261,6 +270,7 @@ function sortTodoZones(zones: Zone[], visitLockMonths: number) {
 
 export default function LeaderPage() {
   const restoredScrollRef = useRef(false);
+  const previousSortTypeRef = useRef<SortType | null>(null);
 
   const [initialScrollY] = useState(getInitialScrollY);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -276,7 +286,7 @@ export default function LeaderPage() {
     useState(getInitialSubRegion);
 
   const [sortType, setSortType] = useState<SortType>(getInitialSortType);
-  const [showRecentOnly, setShowTodayOnly] = useState(getInitialShowRecentOnly);
+  const [showRecentOnly, setShowRecentOnly] = useState(getInitialShowRecentOnly);
   const [visitLockMonths, setVisitLockMonths] = useState(
     DEFAULT_VISIT_LOCK_MONTHS,
   );
@@ -546,6 +556,10 @@ export default function LeaderPage() {
       return matchesSearch && matchesRegion && matchesRecent;
     });
 
+    if (showRecentOnly) {
+      return [...baseFilteredZones].sort(sortByRecentVisit);
+    }
+
     if (sortType === "todo") {
       return sortTodoZones(baseFilteredZones, visitLockMonths);
     }
@@ -671,7 +685,7 @@ export default function LeaderPage() {
                 type="button"
                 onClick={() => setSortType("todo")}
                 className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  sortType === "todo"
+                  !showRecentOnly && sortType === "todo"
                     ? "bg-slate-900 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -683,7 +697,7 @@ export default function LeaderPage() {
                 type="button"
                 onClick={() => setSortType("oldest")}
                 className={`flex items-center justify-center gap-1 rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  sortType === "oldest"
+                  !showRecentOnly && sortType === "oldest"
                     ? "bg-orange-600 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -696,7 +710,7 @@ export default function LeaderPage() {
                 type="button"
                 onClick={() => setSortType("number")}
                 className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  sortType === "number"
+                  !showRecentOnly && sortType === "number"
                     ? "bg-slate-900 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -754,7 +768,21 @@ export default function LeaderPage() {
 
               <button
                 type="button"
-                onClick={() => setShowTodayOnly((value) => !value)}
+                title="최근 7일 이내 방문한 구역을 최근 방문순으로 보기"
+                onClick={() => {
+                  setShowRecentOnly((value) => {
+                    const nextValue = !value;
+
+                    if (nextValue) {
+                      previousSortTypeRef.current = sortType;
+                    } else if (previousSortTypeRef.current) {
+                      setSortType(previousSortTypeRef.current);
+                      previousSortTypeRef.current = null;
+                    }
+
+                    return nextValue;
+                  });
+                }}
                 className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm ring-1 transition sm:text-xs ${
                   showRecentOnly
                     ? "bg-blue-600 text-white ring-blue-600"
