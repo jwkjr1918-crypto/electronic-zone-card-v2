@@ -62,6 +62,17 @@ function getMonthsAgo(months: number) {
   return date;
 }
 
+function isVisitedRecently(zone: Zone) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return false;
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  return seconds * 1000 >= sevenDaysAgo.getTime();
+}
+
 const HOME_STATE_KEY = "electronicZoneCardLeaderState";
 
 type RegionGroup = "전체" | "후포지역" | "영해지역";
@@ -94,6 +105,7 @@ interface HomePageState {
   selectedRegionGroup?: RegionGroup;
   selectedSubRegion?: string;
   sortType?: SortType;
+  showRecentOnly?: boolean;
   scrollY?: number;
 }
 
@@ -146,6 +158,10 @@ function getInitialSortType(): SortType {
   const saved = getSavedHomeState();
 
   return isSortType(saved?.sortType) ? saved.sortType : "todo";
+}
+
+function getInitialShowRecentOnly() {
+  return getSavedHomeState()?.showRecentOnly === true;
 }
 
 function getInitialScrollY() {
@@ -260,6 +276,7 @@ export default function LeaderPage() {
     useState(getInitialSubRegion);
 
   const [sortType, setSortType] = useState<SortType>(getInitialSortType);
+  const [showRecentOnly, setShowTodayOnly] = useState(getInitialShowRecentOnly);
   const [visitLockMonths, setVisitLockMonths] = useState(
     DEFAULT_VISIT_LOCK_MONTHS,
   );
@@ -421,6 +438,7 @@ export default function LeaderPage() {
           selectedRegionGroup,
           selectedSubRegion,
           sortType,
+          showRecentOnly,
           scrollY: window.scrollY,
         });
       });
@@ -439,7 +457,7 @@ export default function LeaderPage() {
       window.removeEventListener("scroll", saveCurrentState);
       window.removeEventListener("pagehide", saveCurrentState);
     };
-  }, [search, selectedRegionGroup, selectedSubRegion, sortType]);
+  }, [search, selectedRegionGroup, selectedSubRegion, sortType, showRecentOnly]);
 
   useEffect(() => {
     if (restoredScrollRef.current) return;
@@ -481,6 +499,13 @@ export default function LeaderPage() {
 
   const duplicateCount = duplicateZoneIds.size;
 
+  const recentVisitedZones = useMemo(
+    () => zones.filter((zone) => isVisitedRecently(zone)),
+    [zones],
+  );
+
+  const recentVisitedCount = recentVisitedZones.length;
+
   const subRegions = useMemo(() => {
     if (selectedRegionGroup === "후포지역") {
       return ["전체", ...HUPO_REGIONS];
@@ -497,6 +522,8 @@ export default function LeaderPage() {
     const baseFilteredZones = zones.filter((zone) => {
       const matchesSearch =
         zone.name.includes(search) || String(zone.id ?? "").includes(search);
+
+      const matchesRecent = !showRecentOnly || isVisitedRecently(zone);
 
       let matchesRegion = true;
 
@@ -516,7 +543,7 @@ export default function LeaderPage() {
               normalizeRegion(selectedSubRegion);
       }
 
-      return matchesSearch && matchesRegion;
+      return matchesSearch && matchesRegion && matchesRecent;
     });
 
     if (sortType === "todo") {
@@ -534,6 +561,7 @@ export default function LeaderPage() {
     selectedRegionGroup,
     selectedSubRegion,
     sortType,
+    showRecentOnly,
     visitLockMonths,
   ]);
 
@@ -547,6 +575,7 @@ export default function LeaderPage() {
       selectedRegionGroup,
       selectedSubRegion,
       sortType,
+      showRecentOnly,
       scrollY: window.scrollY,
     });
   }
@@ -711,15 +740,29 @@ export default function LeaderPage() {
               </Tabs>
             )}
 
-            <div className="text-xs text-slate-500 sm:text-sm">
-              총{" "}
-              <span className="font-semibold text-slate-800">
-                {filteredZones.length}
-              </span>
-              개 구역
-              <span className="ml-2 text-slate-400">
-                방문 제한 {visitLockMonths}개월
-              </span>
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 sm:text-sm">
+              <div>
+                총{" "}
+                <span className="font-semibold text-slate-800">
+                  {filteredZones.length}
+                </span>
+                개 구역
+                <span className="ml-2 text-slate-400">
+                  방문 제한 {visitLockMonths}개월
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowTodayOnly((value) => !value)}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm ring-1 transition sm:text-xs ${
+                  showRecentOnly
+                    ? "bg-blue-600 text-white ring-blue-600"
+                    : "bg-white text-blue-700 ring-blue-100"
+                }`}
+              >
+                최근 방문 {recentVisitedCount}개
+              </button>
             </div>
           </div>
         </div>
