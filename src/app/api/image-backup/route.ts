@@ -98,8 +98,9 @@ export async function POST(request: Request) {
     });
 
     const zipFileName = encodeURIComponent(getBackupZipFileName());
+    const zipBody = new Uint8Array(zipBuffer);
 
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(zipBody, {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
