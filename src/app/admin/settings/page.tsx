@@ -50,7 +50,13 @@ function sanitizeFileName(fileName: string) {
 }
 
 function removeUploadTimestampPrefix(fileName: string) {
-  return fileName.replace(/^\d{10,}_+/, "");
+  return fileName
+    .replace(/^\d{10,}[_-]+/, "")
+    .replace(/^\d{10,}/, "");
+}
+
+function cleanBackupFileName(fileName: string) {
+  return sanitizeFileName(removeUploadTimestampPrefix(fileName));
 }
 
 function getFileNameFromUrl(url: string) {
@@ -63,9 +69,7 @@ function getFileNameFromUrl(url: string) {
     const decodedPath = decodeURIComponent(encodedPath);
     const fileName = decodedPath.split("/").pop();
 
-    return fileName
-      ? sanitizeFileName(removeUploadTimestampPrefix(fileName))
-      : null;
+    return fileName ? cleanBackupFileName(fileName) : null;
   } catch {
     return null;
   }
@@ -89,7 +93,7 @@ function makeBackupFileName(
     : "";
 
   if (originalFileName) {
-    return originalFileName;
+    return cleanBackupFileName(originalFileName);
   }
 
   const baseName =
@@ -353,11 +357,8 @@ export default function AdminSettingsPage() {
             imageUrl,
             imageIndex: index + 1,
             sortNumber: zoneNumber ?? Number.MAX_SAFE_INTEGER,
-            fileName: makeBackupFileName(
-              zoneNumber,
-              zoneName,
-              index + 1,
-              imageUrl,
+            fileName: cleanBackupFileName(
+              makeBackupFileName(zoneNumber, zoneName, index + 1, imageUrl),
             ),
           }));
         })
