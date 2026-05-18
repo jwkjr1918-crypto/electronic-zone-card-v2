@@ -49,6 +49,10 @@ function sanitizeFileName(fileName: string) {
   return cleaned || "구역이미지.jpg";
 }
 
+function removeUploadTimestampPrefix(fileName: string) {
+  return fileName.replace(/^\d{10,}_+/, "");
+}
+
 function getFileNameFromUrl(url: string) {
   try {
     const parsedUrl = new URL(url);
@@ -59,7 +63,9 @@ function getFileNameFromUrl(url: string) {
     const decodedPath = decodeURIComponent(encodedPath);
     const fileName = decodedPath.split("/").pop();
 
-    return fileName ? sanitizeFileName(fileName) : null;
+    return fileName
+      ? sanitizeFileName(removeUploadTimestampPrefix(fileName))
+      : null;
   } catch {
     return null;
   }
