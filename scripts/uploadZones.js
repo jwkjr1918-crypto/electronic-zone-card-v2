@@ -25,7 +25,7 @@ function getRegion(zoneId) {
   }
 
   if (zoneId >= 88 && zoneId <= 125) {
-    return "평해면";
+    return "평해읍";
   }
 
   if (zoneId >= 126 && zoneId <= 167) {
