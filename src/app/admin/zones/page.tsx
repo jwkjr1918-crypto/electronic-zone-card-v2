@@ -645,7 +645,7 @@ export default function AdminZonesPage() {
                         </div>
 
                         <div className="mt-0.5 text-xs text-slate-500">
-                          {zone.region}
+                          {normalizeRegion(zone.region)}
                         </div>
                       </div>
                     </div>
