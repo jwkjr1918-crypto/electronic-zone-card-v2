@@ -10,7 +10,7 @@ import { db } from "@/firebase/firebase";
 
 const regions = [
   "후포면",
-  "평해면",
+  "평해읍",
   "온정면",
   "기성면",
   "영해면",
