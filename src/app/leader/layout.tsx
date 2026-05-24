@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "구역카드(인도자용)",
   description: "인도자용 구역 관리",
-  manifest: "/leader/manifest.webmanifest",
+  manifest: "/leader/manifest",
 
   appleWebApp: {
     capable: true,
@@ -31,7 +31,6 @@ export const metadata: Metadata = {
         type: "image/png",
       },
     ],
-
     apple: [
       {
         url: "/leader-icon-192-safe.png",

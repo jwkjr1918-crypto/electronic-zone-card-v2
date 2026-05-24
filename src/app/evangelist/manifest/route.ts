@@ -1,16 +1,19 @@
-import type { MetadataRoute } from "next";
+import { NextResponse } from "next/server";
 
-export default function manifest(): MetadataRoute.Manifest {
-  return {
+export function GET() {
+  return NextResponse.json({
     name: "구역카드(전도인)",
     short_name: "전도인용",
     description: "전도인용 구역 번호 바로가기",
-    id: "/evangelist-app-v2",
+
+    id: "/evangelist-app",
     start_url: "/evangelist",
     scope: "/evangelist",
+
     display: "standalone",
     background_color: "#f1f5f9",
     theme_color: "#0f172a",
+
     icons: [
       {
         src: "/icon-192.png",
@@ -23,5 +26,5 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
       },
     ],
-  };
+  });
 }

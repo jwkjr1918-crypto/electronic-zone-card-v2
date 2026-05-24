@@ -1,16 +1,19 @@
-import type { MetadataRoute } from "next";
+import { NextResponse } from "next/server";
 
-export default function manifest(): MetadataRoute.Manifest {
-  return {
+export function GET() {
+  return NextResponse.json({
     name: "구역카드(인도자용)",
     short_name: "인도자용",
     description: "후포회중 구역 방문 관리 시스템",
-    id: "/leader-app-v2",
+
+    id: "/leader-app",
     start_url: "/leader",
     scope: "/leader",
+
     display: "standalone",
     background_color: "#f1f5f9",
     theme_color: "#0f172a",
+
     icons: [
       {
         src: "/leader-icon-192-safe.png",
@@ -23,5 +26,5 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
       },
     ],
-  };
+  });
 }
