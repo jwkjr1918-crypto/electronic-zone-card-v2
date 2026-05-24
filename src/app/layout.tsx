@@ -2,20 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "구역카드(전도인)",
-  description: "전도인용 구역 번호 바로가기",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "구역카드(전도인)",
+  title: {
+    default: "구역카드(전도인)",
+    template: "%s",
   },
-  openGraph: {
-    title: "구역카드(전도인)",
-    description: "전도인용 구역 번호 바로가기",
-    siteName: "구역카드(전도인)",
-    type: "website",
-  },
+  description: "후포회중 전자구역카드",
   icons: {
     icon: [
       {
