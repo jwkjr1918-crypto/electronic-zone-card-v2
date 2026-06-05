@@ -629,7 +629,7 @@ export default function ZoneDetailPage() {
                 ) : (
                   <>
                     <CheckCircle2 size={20} />
-                    {savingVisit ? "저장 중..." : "구역완료"}
+                    {savingVisit ? "저장 중..." : "인도자 선택"}
                   </>
                 )}
               </button>
@@ -637,7 +637,7 @@ export default function ZoneDetailPage() {
               {selectingVisitor && !visitLockInfo.locked && (
                 <div className="mt-3 rounded-2xl bg-white/10 p-3">
                   <div className="mb-2 text-sm font-bold text-white">
-                    인도자 이름을 먼저 선택해주세요
+                    방문한 인도자를 선택해주세요
                   </div>
 
                   {visibleVisitorNames.length > 0 ? (
@@ -675,6 +675,10 @@ export default function ZoneDetailPage() {
                     </span>
                   </div>
 
+                  <div className="mt-2 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900">
+                    아래 구역완료를 눌러야 방문기록이 저장됩니다.
+                  </div>
+
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -692,9 +696,9 @@ export default function ZoneDetailPage() {
                       type="button"
                       onClick={() => saveVisitLog(selectedVisitorName)}
                       disabled={savingVisit || !selectedVisitorName}
-                      className="rounded-xl bg-white px-3 py-3 text-sm font-bold text-slate-900 shadow transition hover:bg-slate-200 active:scale-95 disabled:opacity-50"
+                      className="rounded-xl bg-emerald-400 px-3 py-3 text-sm font-bold text-slate-950 shadow transition hover:bg-emerald-300 active:scale-95 disabled:opacity-50"
                     >
-                      {savingVisit ? "저장 중..." : "최종 구역완료"}
+                      {savingVisit ? "저장 중..." : "구역완료"}
                     </button>
                   </div>
                 </div>
