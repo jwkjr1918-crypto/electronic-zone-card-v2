@@ -92,6 +92,7 @@ interface VisitLogData {
   zoneId?: string;
   zoneNumber?: number;
   zoneName?: string;
+  region?: string;
   visitorName?: string;
   createdAt?: Timestamp | null;
 }
@@ -148,7 +149,56 @@ function getVisitedSeconds(zone: Zone) {
 }
 
 function hasVisitRecord(zone: Zone) {
-  return Boolean(zone.lastVisitedAt?.seconds);
+  return Boolean(zone.lastVisitedAt?.seconds) && (zone.visitCount ?? 0) > 0;
+}
+
+function hasVisitorName(log: VisitLogData) {
+  return String(log.visitorName ?? "").trim().length > 0;
+}
+
+function getVisitLogKeys(log: VisitLogData) {
+  const keys: string[] = [];
+
+  if (log.zoneId) {
+    keys.push(`id:${String(log.zoneId)}`);
+  }
+
+  const normalizedRegion = normalizeRegion(log.region);
+
+  if (normalizedRegion && typeof log.zoneNumber === "number") {
+    keys.push(`region:${normalizedRegion}|number:${log.zoneNumber}`);
+  }
+
+  if (normalizedRegion && log.zoneName) {
+    keys.push(`region:${normalizedRegion}|name:${String(log.zoneName)}`);
+  }
+
+  return keys;
+}
+
+function getZoneLookupKeys(zone: Zone) {
+  const keys = [`id:${zone.firestoreId}`];
+  const normalizedRegion = normalizeRegion(zone.region);
+
+  if (normalizedRegion && typeof zone.id === "number") {
+    keys.push(`region:${normalizedRegion}|number:${zone.id}`);
+  }
+
+  if (normalizedRegion && zone.name) {
+    keys.push(`region:${normalizedRegion}|name:${zone.name}`);
+  }
+
+  return keys;
+}
+
+function getFirstMapValue<T>(map: Map<string, T>, keys: string[]) {
+  for (const key of keys) {
+    if (map.has(key)) {
+      return map.get(key);
+    }
+  }
+
+  return undefined;
 }
 
 function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
@@ -335,11 +385,14 @@ export default function LeaderPage() {
 
         visitSnapshot.docs.forEach((visitDoc) => {
           const log = visitDoc.data() as VisitLogData;
-          const visitorName = String(log.visitorName ?? "").trim();
 
           // 예전 오류로 만들어진 방문자 이름 없는 기록은
           // 인도자 화면에서 완료 기록으로 보지 않습니다.
-          if (!visitorName) return;
+          if (!hasVisitorName(log)) return;
+
+          const keys = getVisitLogKeys(log);
+
+          if (keys.length === 0) return;
 
           if (
             log.createdAt?.seconds &&
@@ -347,12 +400,6 @@ export default function LeaderPage() {
           ) {
             recentVisitCount += 1;
           }
-
-          const keys = [
-            log.zoneId ? String(log.zoneId) : null,
-            log.zoneNumber ? String(log.zoneNumber) : null,
-            log.zoneName ? String(log.zoneName) : null,
-          ].filter(Boolean) as string[];
 
           keys.forEach((key) => {
             visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
@@ -364,21 +411,13 @@ export default function LeaderPage() {
         });
 
         const zoneDataWithVisit = zoneData.map((zone) => {
-          const latestVisit =
-            latestVisitMap.get(zone.firestoreId) ||
-            latestVisitMap.get(String(zone.id)) ||
-            latestVisitMap.get(zone.name) ||
-            null;
-
-          const visitCount =
-            visitCountMap.get(zone.firestoreId) ||
-            visitCountMap.get(String(zone.id)) ||
-            visitCountMap.get(zone.name) ||
-            0;
+          const lookupKeys = getZoneLookupKeys(zone);
+          const latestVisit = getFirstMapValue(latestVisitMap, lookupKeys) || null;
+          const visitCount = getFirstMapValue(visitCountMap, lookupKeys) || 0;
 
           return {
             ...zone,
-            lastVisitedAt: latestVisit,
+            lastVisitedAt: visitCount > 0 ? latestVisit : null,
             visitCount,
           };
         });
@@ -804,7 +843,7 @@ export default function LeaderPage() {
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredZones.map((zone) => {
-            const isVisited = Boolean(zone.lastVisitedAt?.seconds);
+            const isVisited = hasVisitRecord(zone);
             const isActive = activeZoneIds.includes(zone.firestoreId);
             const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
 
