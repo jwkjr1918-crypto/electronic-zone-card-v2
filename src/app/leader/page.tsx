@@ -1,213 +1,296 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-
-import { onAuthStateChanged } from "firebase/auth";
-
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  doc,
-  getDoc,
-  addDoc,
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  serverTimestamp,
-  setDoc,
-  deleteDoc,
-} from "firebase/firestore";
-
-import {
-  ArrowLeft,
-  MapPin,
-  Clock,
+  Search,
+  Shield,
+  ClipboardList,
   CheckCircle2,
-  X,
-  RotateCw,
-  Lock,
-  Navigation,
-  ExternalLink,
+  AlertCircle,
+  Eye,
+  TriangleAlert,
+  Clock3,
 } from "lucide-react";
 
-import { db, auth } from "@/firebase/firebase";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocsFromServer,
+  query,
+  orderBy,
+  Timestamp,
+  onSnapshot,
+} from "firebase/firestore";
 
-interface Zone {
-  id?: number;
-  name: string;
-  region: string;
-  imageUrl?: string;
-  addresses?: string[];
-}
+import Link from "next/link";
 
-interface VisitLog {
-  id: string;
-  zoneId: string;
-  zoneName: string;
-  zoneNumber?: number;
-  visitorName?: string;
-  region?: string;
-  createdAt?: {
-    seconds: number;
-  };
-}
+import { db } from "@/firebase/firebase";
 
-const ACTIVE_VIEW_EXPIRE_MS = 120000;
-const ACTIVE_VIEW_HEARTBEAT_MS = 30000;
-const DEFAULT_VISIT_LOCK_MONTHS = 3;
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-function getSessionViewId(zoneId: string) {
-  const key = "activeZoneViewSessionId";
-  const existing = sessionStorage.getItem(key);
+const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
 
-  if (existing) {
-    return `${zoneId}_${existing}`;
-  }
+const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
 
-  const next =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-  sessionStorage.setItem(key, next);
-
-  return `${zoneId}_${next}`;
-}
-
-function addMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
-}
-
-function formatDateTime(date: Date) {
-  return date.toLocaleString("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDate(date: Date) {
-  return date.toLocaleDateString("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
-function normalizeAddresses(addresses?: string[]) {
-  if (!Array.isArray(addresses)) return [];
-
-  return Array.from(
-    new Set(
-      addresses
-        .map((address) => String(address).trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-function getCountyByRegion(region?: string) {
+function normalizeRegion(region?: string) {
   const normalized = String(region ?? "")
     .trim()
     .replace(/\s/g, "");
 
-  const uljinRegions = [
-    "후포면",
-    "평해읍",
-    "온정면",
-    "기성면",
-  ];
+  if (normalized.includes("후포")) return "후포면";
+  if (normalized.includes("평해")) return "평해읍";
+  if (normalized.includes("온정")) return "온정면";
+  if (normalized.includes("기성")) return "기성면";
+  if (normalized.includes("영해")) return "영해면";
+  if (normalized.includes("병곡")) return "병곡면";
+  if (normalized.includes("창수")) return "창수면";
+  if (normalized.includes("축산")) return "축산면";
 
-  return uljinRegions.includes(normalized)
-    ? "울진군"
-    : "영덕군";
+  return normalized;
 }
 
-function getFullAddress(zone: Zone, address: string) {
-  const county = getCountyByRegion(zone.region);
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
+const TOTAL_ZONE_COUNT = 484;
+const RECENT_VISIT_MONTHS = 6;
 
-  return `경상북도 ${county} ${zone.region} ${address}`.trim();
+function getMonthsAgo(months: number) {
+  const date = new Date();
+  date.setMonth(date.getMonth() - months);
+  return date;
 }
 
-function getNaverMapUrl(zone: Zone, address: string) {
-  return `https://map.naver.com/p/search/${encodeURIComponent(
-    getFullAddress(zone, address)
-  )}`;
+function isVisitedRecently(zone: Zone) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return false;
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  return seconds * 1000 >= sevenDaysAgo.getTime();
 }
 
-export default function ZoneDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+const HOME_STATE_KEY = "electronicZoneCardLeaderState";
 
-  const id = params.id as string;
+type RegionGroup = "전체" | "후포지역" | "영해지역";
 
-  const [zone, setZone] = useState<Zone | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
-  const [imageOpen, setImageOpen] = useState(false);
-  const [savingVisit, setSavingVisit] = useState(false);
-  const [visitLockMonths, setVisitLockMonths] = useState(
-    DEFAULT_VISIT_LOCK_MONTHS
+type SortType = "todo" | "number" | "oldest";
+
+interface Zone {
+  firestoreId: string;
+  id?: number;
+  name: string;
+  region: string;
+  lastVisitedAt?: Timestamp | null;
+  visitCount?: number;
+}
+
+interface VisitLogData {
+  zoneId?: string;
+  zoneNumber?: number;
+  zoneName?: string;
+  visitorName?: string;
+  createdAt?: Timestamp | null;
+}
+
+interface ActiveZoneView {
+  zoneId?: string;
+  expiresAt?: number;
+}
+
+interface HomePageState {
+  search?: string;
+  selectedRegionGroup?: RegionGroup;
+  selectedSubRegion?: string;
+  sortType?: SortType;
+  showRecentOnly?: boolean;
+  scrollY?: number;
+}
+
+function isRegionGroup(value: unknown): value is RegionGroup {
+  return value === "전체" || value === "후포지역" || value === "영해지역";
+}
+
+function isSortType(value: unknown): value is SortType {
+  return value === "todo" || value === "number" || value === "oldest";
+}
+
+function getSavedHomeState() {
+  if (typeof window === "undefined") return null;
+
+  const saved = sessionStorage.getItem(HOME_STATE_KEY);
+
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved) as HomePageState;
+  } catch (error) {
+    console.error("메인화면 상태 읽기 실패:", error);
+    return null;
+  }
+}
+
+function saveHomeState(state: HomePageState) {
+  if (typeof window === "undefined") return;
+
+  sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
+}
+
+function getInitialSearch() {
+  return getSavedHomeState()?.search ?? "";
+}
+
+function getInitialRegionGroup(): RegionGroup {
+  const saved = getSavedHomeState();
+
+  return isRegionGroup(saved?.selectedRegionGroup)
+    ? saved.selectedRegionGroup
+    : "전체";
+}
+
+function getInitialSubRegion() {
+  return getSavedHomeState()?.selectedSubRegion ?? "전체";
+}
+
+function getInitialSortType(): SortType {
+  const saved = getSavedHomeState();
+
+  return isSortType(saved?.sortType) ? saved.sortType : "todo";
+}
+
+function getInitialShowRecentOnly() {
+  return getSavedHomeState()?.showRecentOnly === true;
+}
+
+function getInitialScrollY() {
+  return getSavedHomeState()?.scrollY ?? 0;
+}
+
+function getZoneNumber(zone: Zone) {
+  return typeof zone.id === "number" ? zone.id : Number.MAX_SAFE_INTEGER;
+}
+
+function getVisitedSeconds(zone: Zone) {
+  return zone.lastVisitedAt?.seconds ?? null;
+}
+
+function hasVisitRecord(zone: Zone) {
+  return Boolean(zone.lastVisitedAt?.seconds);
+}
+
+function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return false;
+
+  return seconds * 1000 <= cutoffDate.getTime();
+}
+
+function getPassedMonths(zone: Zone) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return null;
+
+  const visitedDate = new Date(seconds * 1000);
+  const now = new Date();
+
+  let months =
+    (now.getFullYear() - visitedDate.getFullYear()) * 12 +
+    (now.getMonth() - visitedDate.getMonth());
+
+  if (now.getDate() < visitedDate.getDate()) {
+    months -= 1;
+  }
+
+  return Math.max(months, 0);
+}
+
+function sortByZoneNumber(a: Zone, b: Zone) {
+  const numberDiff = getZoneNumber(a) - getZoneNumber(b);
+
+  if (numberDiff !== 0) return numberDiff;
+
+  return a.name.localeCompare(b.name, "ko");
+}
+
+function sortOldestZones(a: Zone, b: Zone) {
+  const aVisited = hasVisitRecord(a);
+  const bVisited = hasVisitRecord(b);
+
+  if (!aVisited && !bVisited) {
+    return sortByZoneNumber(a, b);
+  }
+
+  if (!aVisited) return -1;
+  if (!bVisited) return 1;
+
+  const visitedDiff =
+    (a.lastVisitedAt?.seconds ?? 0) - (b.lastVisitedAt?.seconds ?? 0);
+
+  if (visitedDiff !== 0) return visitedDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
+function sortByVisitCountThenZoneNumber(a: Zone, b: Zone) {
+  const countDiff = (a.visitCount ?? 0) - (b.visitCount ?? 0);
+
+  if (countDiff !== 0) return countDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
+function sortByRecentVisit(a: Zone, b: Zone) {
+  const visitedDiff =
+    (b.lastVisitedAt?.seconds ?? 0) - (a.lastVisitedAt?.seconds ?? 0);
+
+  if (visitedDiff !== 0) return visitedDiff;
+
+  return sortByZoneNumber(a, b);
+}
+
+function sortTodoZones(zones: Zone[], visitLockMonths: number) {
+  const cutoffDate = getMonthsAgo(visitLockMonths);
+
+  const unvisitedZones = zones
+    .filter((zone) => !hasVisitRecord(zone))
+    .sort(sortByZoneNumber);
+
+  const expiredZones = zones
+    .filter(
+      (zone) =>
+        hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
+    )
+    .sort(sortByVisitCountThenZoneNumber);
+
+  return [...unvisitedZones, ...expiredZones];
+}
+
+export default function LeaderPage() {
+  const restoredScrollRef = useRef(false);
+  const previousSortTypeRef = useRef<SortType | null>(null);
+
+  const [initialScrollY] = useState(getInitialScrollY);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [recentSixMonthVisitCount, setRecentSixMonthVisitCount] = useState(0);
+  const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
+  const [search, setSearch] = useState(getInitialSearch);
+
+  const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroup>(
+    getInitialRegionGroup,
   );
-  const [allowedVisitorNames, setAllowedVisitorNames] = useState<string[]>([
-    "관리자",
-  ]);
-  const [selectingVisitor, setSelectingVisitor] = useState(false);
-  const [selectedVisitorName, setSelectedVisitorName] = useState("");
 
-  const fromEvangelist = useMemo(() => {
-    if (typeof window === "undefined") return false;
+  const [selectedSubRegion, setSelectedSubRegion] =
+    useState(getInitialSubRegion);
 
-    return (
-      searchParams.get("from") === "evangelist" ||
-      sessionStorage.getItem("zoneEntryFrom") === "evangelist"
-    );
-  }, [searchParams]);
-
-  const addresses = useMemo(() => {
-    return normalizeAddresses(zone?.addresses);
-  }, [zone?.addresses]);
-
-  const visibleVisitorNames = useMemo(() => {
-    return allowedVisitorNames.filter((name) => name !== "관리자");
-  }, [allowedVisitorNames]);
-
-  const visitLockInfo = useMemo(() => {
-    if (!recentVisit?.createdAt?.seconds) {
-      return {
-        locked: false,
-        nextAvailableDate: null as Date | null,
-        remainingDays: 0,
-      };
-    }
-
-    const latestDate = new Date(recentVisit.createdAt.seconds * 1000);
-    const nextAvailableDate = addMonths(latestDate, visitLockMonths);
-    const now = new Date();
-    const locked = now < nextAvailableDate;
-
-    const remainingDays = locked
-      ? Math.ceil(
-          (nextAvailableDate.getTime() - now.getTime()) /
-            (1000 * 60 * 60 * 24)
-        )
-      : 0;
-
-    return {
-      locked,
-      nextAvailableDate,
-      remainingDays,
-    };
-  }, [recentVisit, visitLockMonths]);
+  const [sortType, setSortType] = useState<SortType>(getInitialSortType);
+  const [showRecentOnly, setShowRecentOnly] = useState(getInitialShowRecentOnly);
+  const [visitLockMonths, setVisitLockMonths] = useState(
+    DEFAULT_VISIT_LOCK_MONTHS,
+  );
 
   useEffect(() => {
     async function fetchSettings() {
@@ -217,22 +300,14 @@ export default function ZoneDetailPage() {
 
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
-          const months = Number(data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS);
+          const months = Number(
+            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
+          );
 
           setVisitLockMonths(
             Number.isFinite(months) && months >= 0
               ? months
-              : DEFAULT_VISIT_LOCK_MONTHS
-          );
-
-          const names = Array.isArray(data.allowedVisitorNames)
-            ? data.allowedVisitorNames
-                .map((name: unknown) => String(name).trim())
-                .filter(Boolean)
-            : [];
-
-          setAllowedVisitorNames(
-            names.length > 0 ? Array.from(new Set(names)) : ["관리자"]
+              : DEFAULT_VISIT_LOCK_MONTHS,
           );
         }
       } catch (error) {
@@ -244,542 +319,642 @@ export default function ZoneDetailPage() {
   }, []);
 
   useEffect(() => {
-    async function fetchZone() {
+    async function fetchZones() {
       try {
-        const docRef = doc(db, "zones", id);
-        const docSnap = await getDoc(docRef);
+        const querySnapshot = await getDocsFromServer(collection(db, "zones"));
 
-        if (docSnap.exists()) {
-          setZone(docSnap.data() as Zone);
-        }
-      } catch (error) {
-        console.error("구역 조회 에러:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
+        const zoneData = querySnapshot.docs.map((zoneDoc) => ({
+          firestoreId: zoneDoc.id,
+          ...zoneDoc.data(),
+        })) as Zone[];
 
-    async function fetchRecentVisit() {
-      try {
-        const q = query(
+        const visitQuery = query(
           collection(db, "visitLogs"),
-          where("zoneId", "==", id),
           orderBy("createdAt", "desc"),
-          limit(1)
         );
 
-        const querySnapshot = await getDocs(q);
+        const visitSnapshot = await getDocsFromServer(visitQuery);
 
-        const visits = querySnapshot.docs.map((visitDoc) => ({
-          id: visitDoc.id,
-          ...visitDoc.data(),
-        })) as VisitLog[];
+        const latestVisitMap = new Map<string, Timestamp | null>();
+        const visitCountMap = new Map<string, number>();
+        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
+        let recentVisitCount = 0;
 
-        if (visits.length > 0) {
-          setRecentVisit(visits[0]);
-        }
-      } catch (error) {
-        console.error("방문 기록 조회 에러:", error);
-      }
-    }
+        visitSnapshot.docs.forEach((visitDoc) => {
+          const log = visitDoc.data() as VisitLogData;
+          const visitorName = String(log.visitorName ?? "").trim();
 
-    if (id) {
-      fetchZone();
-      fetchRecentVisit();
-    }
-  }, [id]);
-
-  useEffect(() => {
-    if (!id) return;
-
-    let intervalId: number | null = null;
-    let activeViewDocId: string | null = null;
-    let activeViewRef: ReturnType<typeof doc> | null = null;
-    let cleaned = false;
-
-    async function writeActiveView() {
-      if (!activeViewRef) return;
-
-      await setDoc(
-        activeViewRef,
-        {
-          zoneId: id,
-          enteredAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          expiresAt: Date.now() + ACTIVE_VIEW_EXPIRE_MS,
-        },
-        { merge: true }
-      );
-    }
-
-    async function cleanupActiveView() {
-      if (cleaned || !activeViewRef) return;
-
-      cleaned = true;
-
-      try {
-        await deleteDoc(activeViewRef);
-      } catch (error) {
-        console.error("방문중 상태 삭제 에러:", error);
-      }
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      try {
-        if (user) {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          const userRole = userSnap.exists() ? userSnap.data().role : null;
-
-          if (userRole === "admin") {
+          if (!log.createdAt?.seconds || !visitorName) {
             return;
           }
-        }
 
-        activeViewDocId = getSessionViewId(id);
-        activeViewRef = doc(db, "activeZoneViews", activeViewDocId);
+          if (log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()) {
+            recentVisitCount += 1;
+          }
 
-        await writeActiveView();
+          const keys = [
+            log.zoneId ? String(log.zoneId) : null,
+            log.zoneNumber ? String(log.zoneNumber) : null,
+            log.zoneName ? String(log.zoneName) : null,
+          ].filter(Boolean) as string[];
 
-        intervalId = window.setInterval(() => {
-          writeActiveView().catch((error) => {
-            console.error("방문중 상태 갱신 에러:", error);
+          keys.forEach((key) => {
+            visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
+
+            if (!latestVisitMap.has(key)) {
+              latestVisitMap.set(key, log.createdAt || null);
+            }
           });
-        }, ACTIVE_VIEW_HEARTBEAT_MS);
+        });
+
+        const zoneDataWithVisit = zoneData.map((zone) => {
+          const latestVisit =
+            latestVisitMap.get(zone.firestoreId) ||
+            latestVisitMap.get(String(zone.id)) ||
+            latestVisitMap.get(zone.name) ||
+            null;
+
+          const visitCount =
+            visitCountMap.get(zone.firestoreId) ||
+            visitCountMap.get(String(zone.id)) ||
+            visitCountMap.get(zone.name) ||
+            0;
+
+          return {
+            ...zone,
+            lastVisitedAt: latestVisit,
+            visitCount,
+          };
+        });
+
+        setZones(zoneDataWithVisit);
+        setRecentSixMonthVisitCount(recentVisitCount);
       } catch (error) {
-        console.error("방문중 상태 등록 에러:", error);
+        console.error("Firebase 에러:", error);
       }
-    });
+    }
 
-    const handleBeforeUnload = () => {
-      if (!activeViewDocId) return;
+    fetchZones();
+  }, []);
 
-      const url = `https://firestore.googleapis.com/v1/projects/${
-        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-      }/databases/(default)/documents/activeZoneViews/${activeViewDocId}`;
+  useEffect(() => {
+    let latestViews: ActiveZoneView[] = [];
 
-      try {
-        navigator.sendBeacon?.(url);
-      } catch {
-        // expiresAt으로 자동 만료 처리됩니다.
-      }
-    };
+    function updateActiveZones(views: ActiveZoneView[]) {
+      const now = Date.now();
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+      const ids = Array.from(
+        new Set(
+          views
+            .filter(
+              (view) => view.zoneId && view.expiresAt && view.expiresAt > now,
+            )
+            .map((view) => String(view.zoneId)),
+        ),
+      );
+
+      setActiveZoneIds(ids);
+    }
+
+    const unsubscribe = onSnapshot(
+      collection(db, "activeZoneViews"),
+      (snapshot) => {
+        latestViews = snapshot.docs.map(
+          (viewDoc) => viewDoc.data() as ActiveZoneView,
+        );
+
+        updateActiveZones(latestViews);
+      },
+    );
+
+    const interval = window.setInterval(() => {
+      updateActiveZones(latestViews);
+    }, 15000);
 
     return () => {
       unsubscribe();
-
-      if (intervalId) {
-        window.clearInterval(intervalId);
-      }
-
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-
-      cleanupActiveView();
+      window.clearInterval(interval);
     };
-  }, [id]);
+  }, []);
 
   useEffect(() => {
-    if (!imageOpen) return;
+    if (typeof window === "undefined") return;
 
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    let animationFrameId = 0;
 
-    window.history.pushState({ imageOpen: true }, "");
+    function saveCurrentState() {
+      window.cancelAnimationFrame(animationFrameId);
 
-    const handlePopState = () => {
-      setImageOpen(false);
-    };
+      animationFrameId = window.requestAnimationFrame(() => {
+        saveHomeState({
+          search,
+          selectedRegionGroup,
+          selectedSubRegion,
+          sortType,
+          showRecentOnly,
+          scrollY: window.scrollY,
+        });
+      });
+    }
 
-    window.addEventListener("popstate", handlePopState);
+    saveCurrentState();
+
+    window.addEventListener("scroll", saveCurrentState, {
+      passive: true,
+    });
+
+    window.addEventListener("pagehide", saveCurrentState);
 
     return () => {
-      document.body.style.overflow = originalOverflow;
-      window.removeEventListener("popstate", handlePopState);
+      window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("scroll", saveCurrentState);
+      window.removeEventListener("pagehide", saveCurrentState);
     };
-  }, [imageOpen]);
+  }, [search, selectedRegionGroup, selectedSubRegion, sortType, showRecentOnly]);
 
-  function closeImage() {
-    setImageOpen(false);
-  }
+  useEffect(() => {
+    if (restoredScrollRef.current) return;
+    if (zones.length === 0) return;
 
-  async function refreshRecentVisit() {
-    const q = query(
-      collection(db, "visitLogs"),
-      where("zoneId", "==", id),
-      orderBy("createdAt", "desc"),
-      limit(1)
-    );
-
-    const querySnapshot = await getDocs(q);
-
-    const visits = querySnapshot.docs.map((visitDoc) => ({
-      id: visitDoc.id,
-      ...visitDoc.data(),
-    })) as VisitLog[];
-
-    if (visits.length > 0) {
-      setRecentVisit(visits[0]);
-    }
-  }
-
-  async function saveVisitLog(visitorName: string) {
-    if (!zone || savingVisit) return;
-
-    const trimmedVisitorName = visitorName.trim();
-
-    if (!allowedVisitorNames.includes(trimmedVisitorName)) {
-      alert("설정에서 허용된 인도자 이름만 사용할 수 있습니다.");
+    if (!initialScrollY || initialScrollY <= 0) {
+      restoredScrollRef.current = true;
       return;
     }
 
-    try {
-      setSavingVisit(true);
+    const timeoutId = window.setTimeout(() => {
+      window.scrollTo(0, initialScrollY);
+      restoredScrollRef.current = true;
+    }, 120);
 
-      await addDoc(collection(db, "visitLogs"), {
-        zoneId: id,
-        zoneName: zone.name,
-        zoneNumber: zone.id,
-        region: zone.region,
-        visitorName: trimmedVisitorName,
-        createdAt: serverTimestamp(),
-      });
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [zones.length, initialScrollY]);
 
-      alert(`${trimmedVisitorName}님 이름으로 방문완료 처리되었습니다!`);
+  const duplicateZoneIds = useMemo(() => {
+    const countMap = new Map<number, number>();
 
-      setSelectingVisitor(false);
-      setSelectedVisitorName("");
+    zones.forEach((zone) => {
+      if (typeof zone.id !== "number") return;
 
-      await refreshRecentVisit();
+      countMap.set(zone.id, (countMap.get(zone.id) || 0) + 1);
+    });
 
-      if (fromEvangelist) {
-        sessionStorage.removeItem("zoneEntryFrom");
-        router.push("/");
+    return new Set(
+      zones
+        .filter(
+          (zone) =>
+            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1,
+        )
+        .map((zone) => zone.firestoreId),
+    );
+  }, [zones]);
+
+  const duplicateCount = duplicateZoneIds.size;
+
+  const recentVisitedZones = useMemo(
+    () => zones.filter((zone) => isVisitedRecently(zone)),
+    [zones],
+  );
+
+  const recentVisitedCount = recentVisitedZones.length;
+
+  const subRegions = useMemo(() => {
+    if (selectedRegionGroup === "후포지역") {
+      return ["전체", ...HUPO_REGIONS];
+    }
+
+    if (selectedRegionGroup === "영해지역") {
+      return ["전체", ...YEONGHAE_REGIONS];
+    }
+
+    return ["전체"];
+  }, [selectedRegionGroup]);
+
+  const filteredZones = useMemo(() => {
+    const baseFilteredZones = zones.filter((zone) => {
+      const matchesSearch =
+        zone.name.includes(search) || String(zone.id ?? "").includes(search);
+
+      const matchesRecent = !showRecentOnly || isVisitedRecently(zone);
+
+      let matchesRegion = true;
+
+      if (selectedRegionGroup === "후포지역") {
+        matchesRegion =
+          selectedSubRegion === "전체"
+            ? HUPO_REGIONS.includes(normalizeRegion(zone.region))
+            : normalizeRegion(zone.region) ===
+              normalizeRegion(selectedSubRegion);
       }
-    } catch (error) {
-      console.error("방문 기록 저장 에러:", error);
-      alert("저장 실패");
-    } finally {
-      setSavingVisit(false);
-    }
-  }
 
-  function handleVisitLog() {
-    if (!zone || savingVisit) return;
+      if (selectedRegionGroup === "영해지역") {
+        matchesRegion =
+          selectedSubRegion === "전체"
+            ? YEONGHAE_REGIONS.includes(normalizeRegion(zone.region))
+            : normalizeRegion(zone.region) ===
+              normalizeRegion(selectedSubRegion);
+      }
 
-    if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
-      alert(
-        `최근 방문완료 후 ${visitLockMonths}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
-          visitLockInfo.nextAvailableDate
-        )}`
-      );
-      return;
+      return matchesSearch && matchesRegion && matchesRecent;
+    });
+
+    if (showRecentOnly) {
+      return [...baseFilteredZones].sort(sortByRecentVisit);
     }
 
-    setSelectedVisitorName("");
-    setSelectingVisitor(true);
-  }
+    if (sortType === "todo") {
+      return sortTodoZones(baseFilteredZones, visitLockMonths);
+    }
 
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-slate-100 p-6">
-        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow">
-          불러오는 중...
-        </div>
-      </main>
-    );
-  }
+    if (sortType === "oldest") {
+      return [...baseFilteredZones].sort(sortOldestZones);
+    }
 
-  if (!zone) {
-    return (
-      <main className="min-h-screen bg-slate-100 p-6">
-        <div className="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow">
-          구역 정보를 찾을 수 없습니다.
-        </div>
-      </main>
-    );
+    return [...baseFilteredZones].sort(sortByZoneNumber);
+  }, [
+    zones,
+    search,
+    selectedRegionGroup,
+    selectedSubRegion,
+    sortType,
+    showRecentOnly,
+    visitLockMonths,
+  ]);
+
+  const recentSixMonthVisitPercent = Math.round(
+    (recentSixMonthVisitCount / TOTAL_ZONE_COUNT) * 100,
+  );
+
+  function saveStateBeforeNavigation() {
+    saveHomeState({
+      search,
+      selectedRegionGroup,
+      selectedSubRegion,
+      sortType,
+      showRecentOnly,
+      scrollY: window.scrollY,
+    });
   }
 
   return (
-    <>
-      <main className="min-h-screen bg-slate-100 p-3 sm:p-4">
-        <div className="mx-auto max-w-3xl">
-          <Link
-            href={fromEvangelist ? "/" : "/leader"}
-            className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
-          >
-            <ArrowLeft size={18} />
-            {fromEvangelist
-              ? "번호 입력 화면으로 돌아가기"
-              : "메인으로 돌아가기"}
-          </Link>
+    <main className="min-h-screen bg-slate-100 px-3 pb-3 sm:px-4 sm:pb-4">
+      <div className="mx-auto max-w-7xl">
+        <div className="sticky top-0 z-40 -mx-3 mb-3 border-b border-slate-200 bg-slate-100/95 px-3 pb-3 pt-3 backdrop-blur sm:-mx-4 sm:px-4">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <Link
+                href="/visits"
+                className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
+              >
+                <ClipboardList size={15} />
+                <span className="font-medium">방문기록</span>
+              </Link>
 
-          <section className="rounded-3xl bg-slate-900 text-white shadow">
-            <div className="p-4 sm:p-6">
-              <p className="text-sm text-slate-300">{zone.region}</p>
+              <Link
+                href="/admin"
+                className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
+              >
+                <Shield size={15} />
+                <span className="font-medium">관리자</span>
+              </Link>
+            </div>
 
-              <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-                {zone.id}번 {zone.name}
-              </h1>
+            <div className="mb-4 flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-xl font-bold text-slate-900 sm:text-3xl">
+                  후포회중 구역카드
+                </h1>
 
-              {zone.imageUrl && (
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => setImageOpen(true)}
-                    className="block w-full overflow-hidden rounded-2xl bg-black/20"
-                  >
-                    <Image
-                      src={zone.imageUrl}
-                      alt={zone.name}
-                      width={1600}
-                      height={1200}
-                      className="h-auto max-h-[72vh] w-full object-contain select-none"
-                      priority
-                    />
-                  </button>
-
-                  <div className="mt-2 flex items-center justify-center gap-1 text-xs text-slate-400">
-                    <RotateCw size={13} />
-                    이미지를 누르면 회전된 전체화면으로 볼 수 있습니다.
-                  </div>
-                </div>
-              )}
-
-              {addresses.length > 0 && (
-                <div className="mt-5 rounded-2xl bg-white/10 p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-bold text-white">
-                    <Navigation size={16} />
-                    지도 바로가기
-                  </div>
-
-                  <div className="space-y-2">
-                    {addresses.map((address) => (
-                      <div
-                        key={address}
-                        className="flex items-center gap-2 rounded-xl bg-white p-3 text-slate-900"
-                      >
-                        <MapPin
-                          size={16}
-                          className="shrink-0 text-slate-500"
-                        />
-
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-bold">
-                            {address}
-                          </div>
-                          <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                            {getFullAddress(zone, address)}
-                          </div>
-                        </div>
-
-                        <a
-                          href={getNaverMapUrl(zone, address)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
-                        >
-                          <ExternalLink size={12} />
-                          지도 열기
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-5 flex items-center gap-2 text-slate-300">
-                <MapPin size={18} />
-                <span>{zone.region}</span>
+                <p className="mt-0.5 truncate text-[11px] text-slate-500 sm:text-sm">
+                  후포회중구역 방문 관리 시스템
+                </p>
               </div>
 
-              {visitLockInfo.locked && visitLockInfo.nextAvailableDate && (
-                <div className="mt-5 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
-                  <div className="flex items-center gap-2 font-bold">
-                    <Lock size={16} />
-                    {visitLockMonths}개월 미만 재완료 제한
-                  </div>
-                  <p className="mt-1">
-                    다음 완료 가능일:{" "}
-                    <span className="font-bold">
-                      {formatDate(visitLockInfo.nextAvailableDate)}
-                    </span>
-                    {visitLockInfo.remainingDays > 0
-                      ? ` (${visitLockInfo.remainingDays}일 남음)`
-                      : ""}
-                  </p>
+              <div className="shrink-0 rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
+                <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
+                  최근6개월<br />
+                  {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
+                  {recentSixMonthVisitPercent}%
                 </div>
-              )}
 
+                <div className="hidden sm:block">
+                  <div className="text-[11px] font-semibold text-slate-500 sm:text-xs">
+                    최근 6개월 방문완료
+                  </div>
+
+                  <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
+                    {recentSixMonthVisitCount}
+                    <span className="mx-1 text-sm font-bold text-slate-400">
+                      /
+                    </span>
+                    <span className="text-sm font-bold text-slate-500">
+                      {TOTAL_ZONE_COUNT}
+                    </span>
+                  </div>
+
+                  <div className="text-xs font-bold text-emerald-700 sm:text-sm">
+                    {recentSixMonthVisitPercent}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {duplicateCount > 0 && (
+              <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 shadow-sm">
+                <TriangleAlert size={18} />
+                <span className="font-semibold">
+                  중복된 구역번호 {duplicateCount}개 발견
+                </span>
+              </div>
+            )}
+
+            <div className="relative mb-3">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                size={16}
+              />
+
+              <Input
+                placeholder="구역 이름 또는 번호 검색"
+                className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="mb-3 grid grid-cols-3 gap-2">
               <button
-                onClick={handleVisitLog}
-                disabled={visitLockInfo.locked || savingVisit}
-                className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold transition disabled:cursor-not-allowed ${
-                  visitLockInfo.locked
-                    ? "bg-slate-500 text-slate-200"
-                    : "bg-white text-slate-900 hover:bg-slate-200"
+                type="button"
+                onClick={() => setSortType("todo")}
+                className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+                  !showRecentOnly && sortType === "todo"
+                    ? "bg-slate-900 text-white"
+                    : "bg-white text-slate-600"
                 }`}
               >
-                {visitLockInfo.locked ? (
-                  <>
-                    <Lock size={20} />
-                    {visitLockMonths}개월 이후 완료 가능
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 size={20} />
-                    {savingVisit ? "저장 중..." : "인도자 선택"}
-                  </>
-                )}
+                방문할 곳
               </button>
 
-              {selectingVisitor && !visitLockInfo.locked && (
-                <div className="mt-3 rounded-2xl bg-white/10 p-3">
-                  <div className="mb-2 text-sm font-bold text-white">
-                    방문한 인도자를 선택해주세요
-                  </div>
+              <button
+                type="button"
+                onClick={() => setSortType("oldest")}
+                className={`flex items-center justify-center gap-1 rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+                  !showRecentOnly && sortType === "oldest"
+                    ? "bg-orange-600 text-white"
+                    : "bg-white text-slate-600"
+                }`}
+              >
+                <Clock3 size={14} />
+                오래된 순
+              </button>
 
-                  {visibleVisitorNames.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {visibleVisitorNames.map((name) => {
-                        const selected = selectedVisitorName === name;
-
-                        return (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => setSelectedVisitorName(name)}
-                            disabled={savingVisit}
-                            className={`rounded-xl px-3 py-3 text-sm font-bold shadow transition active:scale-95 disabled:opacity-50 ${
-                              selected
-                                ? "bg-emerald-400 text-slate-950 ring-2 ring-white"
-                                : "bg-white text-slate-900 hover:bg-slate-200"
-                            }`}
-                          >
-                            {name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl bg-amber-100 px-3 py-3 text-sm font-bold text-amber-900">
-                      설정에서 인도자 이름을 먼저 추가해주세요.
-                    </div>
-                  )}
-
-                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm text-white">
-                    선택된 이름:{" "}
-                    <span className="font-bold">
-                      {selectedVisitorName || "아직 선택 안 됨"}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900">
-                    아래 구역완료를 눌러야 방문기록이 저장됩니다.
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectingVisitor(false);
-                        setSelectedVisitorName("");
-                      }}
-                      disabled={savingVisit}
-                      className="rounded-xl bg-white/10 px-3 py-3 text-sm font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
-                    >
-                      취소
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => saveVisitLog(selectedVisitorName)}
-                      disabled={savingVisit || !selectedVisitorName}
-                      className="rounded-xl bg-emerald-400 px-3 py-3 text-sm font-bold text-slate-950 shadow transition hover:bg-emerald-300 active:scale-95 disabled:opacity-50"
-                    >
-                      {savingVisit ? "저장 중..." : "구역완료"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="mt-5 rounded-3xl bg-white p-5 shadow">
-            <div className="flex items-center gap-2">
-              <Clock size={18} />
-              <h2 className="text-lg font-bold">최근 방문 기록</h2>
+              <button
+                type="button"
+                onClick={() => setSortType("number")}
+                className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
+                  !showRecentOnly && sortType === "number"
+                    ? "bg-slate-900 text-white"
+                    : "bg-white text-slate-600"
+                }`}
+              >
+                모두 표시
+              </button>
             </div>
 
-            {recentVisit ? (
-              <div className="mt-4 rounded-2xl bg-slate-100 p-4">
-                <p className="font-semibold">
-                  {recentVisit.zoneNumber}번 {recentVisit.zoneName}
-                </p>
+            <Tabs value={selectedRegionGroup} className="mb-2">
+              <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
+                {["전체", "후포지역", "영해지역"].map((regionGroup) => (
+                  <TabsTrigger
+                    key={regionGroup}
+                    value={regionGroup}
+                    onClick={() => {
+                      setSelectedRegionGroup(regionGroup as RegionGroup);
+                      setSelectedSubRegion("전체");
+                    }}
+                    className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                  >
+                    {regionGroup}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
 
-                {recentVisit.visitorName && (
-                  <p className="mt-1 text-sm font-medium text-slate-700">
-                    방문자: {recentVisit.visitorName}
-                  </p>
-                )}
-
-                <p className="mt-1 text-sm text-slate-500">
-                  {recentVisit.createdAt?.seconds
-                    ? formatDateTime(
-                        new Date(recentVisit.createdAt.seconds * 1000)
-                      )
-                    : "시간 정보 없음"}
-                </p>
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-slate-500">
-                아직 방문 기록이 없습니다.
-              </p>
+            {selectedRegionGroup !== "전체" && (
+              <Tabs value={selectedSubRegion} className="mb-3">
+                <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
+                  {subRegions.map((region) => (
+                    <TabsTrigger
+                      key={region}
+                      value={region}
+                      onClick={() => setSelectedSubRegion(region)}
+                      className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
+                    >
+                      {region}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
             )}
-          </section>
-        </div>
-      </main>
 
-      {imageOpen && zone.imageUrl && (
-        <div className="fixed inset-0 z-50 bg-black">
-          <button
-            type="button"
-            onClick={closeImage}
-            className="absolute right-4 top-4 z-[60] rounded-full bg-white/20 p-3 text-white backdrop-blur transition hover:bg-white/30 active:scale-95"
-            aria-label="이미지 닫기"
-          >
-            <X size={26} />
-          </button>
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 sm:text-sm">
+              <div>
+                총{" "}
+                <span className="font-semibold text-slate-800">
+                  {filteredZones.length}
+                </span>
+                개 구역
+                <span className="ml-2 text-slate-400">
+                  방문 제한 {visitLockMonths}개월
+                </span>
+              </div>
 
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={closeImage}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                closeImage();
-              }
-            }}
-            className="flex h-dvh w-dvw items-center justify-center overflow-hidden"
-          >
-            <Image
-              src={zone.imageUrl}
-              alt={zone.name}
-              width={1800}
-              height={1400}
-              className="rotate-90 object-contain select-none"
-              style={{
-                width: "100dvh",
-                height: "100dvw",
-                maxWidth: "100dvh",
-                maxHeight: "100dvw",
-              }}
-              priority
-            />
+              <button
+                type="button"
+                title="최근 7일 이내 방문한 구역을 최근 방문순으로 보기"
+                onClick={() => {
+                  setShowRecentOnly((value) => {
+                    const nextValue = !value;
+
+                    if (nextValue) {
+                      previousSortTypeRef.current = sortType;
+                    } else if (previousSortTypeRef.current) {
+                      setSortType(previousSortTypeRef.current);
+                      previousSortTypeRef.current = null;
+                    }
+
+                    return nextValue;
+                  });
+                }}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm ring-1 transition sm:text-xs ${
+                  showRecentOnly
+                    ? "bg-blue-600 text-white ring-blue-600"
+                    : "bg-white text-blue-700 ring-blue-100"
+                }`}
+              >
+                최근 방문 {recentVisitedCount}개
+              </button>
+            </div>
           </div>
         </div>
-      )}
-    </>
+
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {filteredZones.map((zone) => {
+            const isVisited = Boolean(zone.lastVisitedAt?.seconds);
+            const isActive = activeZoneIds.includes(zone.firestoreId);
+            const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
+
+            const passedMonths = getPassedMonths(zone);
+
+            const isVisitExpired =
+              isVisited &&
+              passedMonths !== null &&
+              passedMonths >= visitLockMonths;
+
+            return (
+              <Link
+                href={`/zone/${zone.firestoreId}`}
+                key={zone.firestoreId}
+                onClick={saveStateBeforeNavigation}
+              >
+                <Card
+                  className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                    isDuplicate
+                      ? "border-red-300 bg-red-50 ring-1 ring-red-100"
+                      : isActive
+                        ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
+                        : isVisited
+                          ? "border-slate-200 bg-slate-50 opacity-85"
+                          : "border-slate-200 bg-white"
+                  }`}
+                >
+                  <CardContent className="p-3 sm:p-3.5">
+                    <div className="mb-2">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <div
+                          className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
+                            isDuplicate
+                              ? "bg-red-600"
+                              : isActive
+                                ? "bg-emerald-600"
+                                : isVisited
+                                  ? "bg-slate-500"
+                                  : "bg-slate-900"
+                          }`}
+                        >
+                          {zone.id}.
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h3
+                            className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                              isDuplicate
+                                ? "text-red-900"
+                                : isActive
+                                  ? "text-emerald-950"
+                                  : isVisited
+                                    ? "text-slate-700"
+                                    : "text-slate-900"
+                            }`}
+                          >
+                            {zone.name}
+                          </h3>
+
+                          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                            {zone.region}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {isDuplicate && (
+                          <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[10px] font-bold text-white sm:text-[11px]">
+                            <TriangleAlert size={11} />
+                            중복번호
+                          </div>
+                        )}
+
+                        <div
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                            isActive
+                              ? "bg-emerald-600 text-white"
+                              : isVisited
+                                ? "bg-slate-200 text-slate-600"
+                                : "bg-blue-50 text-blue-700"
+                          }`}
+                        >
+                          {isActive ? (
+                            <>
+                              <Eye size={11} />
+                              방문중
+                            </>
+                          ) : isVisited && !isVisitExpired ? (
+                            <>
+                              <CheckCircle2 size={11} />
+                              완료
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle size={11} />
+                              방문 필요
+                            </>
+                          )}
+                        </div>
+
+                        {isVisitExpired && passedMonths !== null && (
+                          <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
+                            {passedMonths}개월 지남
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`mt-3 rounded-lg px-2.5 py-2 ${
+                        isDuplicate
+                          ? "bg-red-100/60"
+                          : isActive
+                            ? "bg-white/80"
+                            : isVisited
+                              ? "bg-slate-100"
+                              : "bg-slate-50"
+                      }`}
+                    >
+                      <div className="text-[10px] text-slate-400 sm:text-[11px]">
+                        최근 방문
+                      </div>
+
+                      <div
+                        className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
+                          isDuplicate
+                            ? "text-red-800"
+                            : isActive
+                              ? "text-emerald-800"
+                              : isVisited
+                                ? "text-slate-700"
+                                : "text-slate-600"
+                        }`}
+                      >
+                        {zone.lastVisitedAt?.seconds
+                          ? new Date(
+                              zone.lastVisitedAt.seconds * 1000,
+                            ).toLocaleString("ko-KR", {
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "방문 기록 없음"}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </main>
   );
 }
