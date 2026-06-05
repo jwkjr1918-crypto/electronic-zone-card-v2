@@ -16,7 +16,7 @@ import {
   collection,
   doc,
   getDoc,
-  getDocsFromServer,
+  getDocs,
   query,
   orderBy,
   Timestamp,
@@ -139,36 +139,6 @@ function saveHomeState(state: HomePageState) {
   sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
 }
 
-function getInitialSearch() {
-  return getSavedHomeState()?.search ?? "";
-}
-
-function getInitialRegionGroup(): RegionGroup {
-  const saved = getSavedHomeState();
-
-  return isRegionGroup(saved?.selectedRegionGroup)
-    ? saved.selectedRegionGroup
-    : "전체";
-}
-
-function getInitialSubRegion() {
-  return getSavedHomeState()?.selectedSubRegion ?? "전체";
-}
-
-function getInitialSortType(): SortType {
-  const saved = getSavedHomeState();
-
-  return isSortType(saved?.sortType) ? saved.sortType : "todo";
-}
-
-function getInitialShowRecentOnly() {
-  return getSavedHomeState()?.showRecentOnly === true;
-}
-
-function getInitialScrollY() {
-  return getSavedHomeState()?.scrollY ?? 0;
-}
-
 function getZoneNumber(zone: Zone) {
   return typeof zone.id === "number" ? zone.id : Number.MAX_SAFE_INTEGER;
 }
@@ -261,8 +231,7 @@ function sortTodoZones(zones: Zone[], visitLockMonths: number) {
 
   const expiredZones = zones
     .filter(
-      (zone) =>
-        hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
+      (zone) => hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
     )
     .sort(sortByVisitCountThenZoneNumber);
 
@@ -273,24 +242,48 @@ export default function LeaderPage() {
   const restoredScrollRef = useRef(false);
   const previousSortTypeRef = useRef<SortType | null>(null);
 
-  const [initialScrollY] = useState(getInitialScrollY);
+  const [initialScrollY, setInitialScrollY] = useState(0);
+  const [stateHydrated, setStateHydrated] = useState(false);
   const [zones, setZones] = useState<Zone[]>([]);
   const [recentSixMonthVisitCount, setRecentSixMonthVisitCount] = useState(0);
   const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
-  const [search, setSearch] = useState(getInitialSearch);
+  const [search, setSearch] = useState("");
 
-  const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroup>(
-    getInitialRegionGroup,
-  );
+  const [selectedRegionGroup, setSelectedRegionGroup] =
+    useState<RegionGroup>("전체");
 
-  const [selectedSubRegion, setSelectedSubRegion] =
-    useState(getInitialSubRegion);
+  const [selectedSubRegion, setSelectedSubRegion] = useState("전체");
 
-  const [sortType, setSortType] = useState<SortType>(getInitialSortType);
-  const [showRecentOnly, setShowRecentOnly] = useState(getInitialShowRecentOnly);
+  const [sortType, setSortType] = useState<SortType>("todo");
+  const [showRecentOnly, setShowRecentOnly] = useState(false);
   const [visitLockMonths, setVisitLockMonths] = useState(
     DEFAULT_VISIT_LOCK_MONTHS,
   );
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const saved = getSavedHomeState();
+
+      if (saved) {
+        setSearch(saved.search ?? "");
+        setSelectedRegionGroup(
+          isRegionGroup(saved.selectedRegionGroup)
+            ? saved.selectedRegionGroup
+            : "전체",
+        );
+        setSelectedSubRegion(saved.selectedSubRegion ?? "전체");
+        setSortType(isSortType(saved.sortType) ? saved.sortType : "todo");
+        setShowRecentOnly(saved.showRecentOnly === true);
+        setInitialScrollY(saved.scrollY ?? 0);
+      }
+
+      setStateHydrated(true);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   useEffect(() => {
     async function fetchSettings() {
@@ -321,7 +314,7 @@ export default function LeaderPage() {
   useEffect(() => {
     async function fetchZones() {
       try {
-        const querySnapshot = await getDocsFromServer(collection(db, "zones"));
+        const querySnapshot = await getDocs(collection(db, "zones"));
 
         const zoneData = querySnapshot.docs.map((zoneDoc) => ({
           firestoreId: zoneDoc.id,
@@ -333,7 +326,7 @@ export default function LeaderPage() {
           orderBy("createdAt", "desc"),
         );
 
-        const visitSnapshot = await getDocsFromServer(visitQuery);
+        const visitSnapshot = await getDocs(visitQuery);
 
         const latestVisitMap = new Map<string, Timestamp | null>();
         const visitCountMap = new Map<string, number>();
@@ -344,11 +337,14 @@ export default function LeaderPage() {
           const log = visitDoc.data() as VisitLogData;
           const visitorName = String(log.visitorName ?? "").trim();
 
-          if (!log.createdAt?.seconds || !visitorName) {
-            return;
-          }
+          // 예전 오류로 만들어진 방문자 이름 없는 기록은
+          // 인도자 화면에서 완료 기록으로 보지 않습니다.
+          if (!visitorName) return;
 
-          if (log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()) {
+          if (
+            log.createdAt?.seconds &&
+            log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()
+          ) {
             recentVisitCount += 1;
           }
 
@@ -438,7 +434,7 @@ export default function LeaderPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !stateHydrated) return;
 
     let animationFrameId = 0;
 
@@ -470,7 +466,14 @@ export default function LeaderPage() {
       window.removeEventListener("scroll", saveCurrentState);
       window.removeEventListener("pagehide", saveCurrentState);
     };
-  }, [search, selectedRegionGroup, selectedSubRegion, sortType, showRecentOnly]);
+  }, [
+    search,
+    selectedRegionGroup,
+    selectedSubRegion,
+    sortType,
+    showRecentOnly,
+    stateHydrated,
+  ]);
 
   useEffect(() => {
     if (restoredScrollRef.current) return;
@@ -633,7 +636,8 @@ export default function LeaderPage() {
 
               <div className="shrink-0 rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
                 <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
-                  최근6개월<br />
+                  최근6개월
+                  <br />
                   {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
                   {recentSixMonthVisitPercent}%
                 </div>
