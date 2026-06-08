@@ -53,7 +53,6 @@ function normalizeRegion(region?: string) {
 }
 
 const DEFAULT_VISIT_LOCK_MONTHS = 3;
-const TOTAL_ZONE_COUNT = 484;
 const RECENT_VISIT_MONTHS = 6;
 
 function getMonthsAgo(months: number) {
@@ -624,9 +623,12 @@ export default function LeaderPage() {
     visitLockMonths,
   ]);
 
-  const recentSixMonthVisitPercent = Math.round(
-    (recentSixMonthVisitCount / TOTAL_ZONE_COUNT) * 100,
-  );
+  const totalZoneCount = zones.length;
+
+  const recentSixMonthVisitPercent =
+    totalZoneCount > 0
+      ? Math.round((recentSixMonthVisitCount / totalZoneCount) * 100)
+      : 0;
 
   function saveStateBeforeNavigation() {
     saveHomeState({
@@ -677,7 +679,7 @@ export default function LeaderPage() {
                 <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
                   최근6개월
                   <br />
-                  {recentSixMonthVisitCount}/{TOTAL_ZONE_COUNT} ·{" "}
+                  {recentSixMonthVisitCount}/{totalZoneCount} ·{" "}
                   {recentSixMonthVisitPercent}%
                 </div>
 
@@ -692,7 +694,7 @@ export default function LeaderPage() {
                       /
                     </span>
                     <span className="text-sm font-bold text-slate-500">
-                      {TOTAL_ZONE_COUNT}
+                      {totalZoneCount}
                     </span>
                   </div>
 
