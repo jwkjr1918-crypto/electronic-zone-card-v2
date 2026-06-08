@@ -56,7 +56,6 @@ const regions = [
 ];
 
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-const TOTAL_ZONE_COUNT = 484;
 const WORD_TEMPLATE_PATH = "/templates/구역배정기록 S-13_KO.docx";
 const VALID_VISIT_INTERVAL_MONTHS = 3;
 const DEFAULT_VISIT_LOCK_MONTHS = 3;
@@ -186,6 +185,7 @@ export default function VisitsPage() {
   const shiftPressedRef = useRef(false);
 
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
+  const [totalZoneCount, setTotalZoneCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openZone, setOpenZone] = useState<string | null>(null);
@@ -294,6 +294,20 @@ export default function VisitsPage() {
       fetchSettings();
     }
   }, [checkingAuth]);
+
+
+  useEffect(() => {
+    async function fetchZoneCount() {
+      try {
+        const snapshot = await getDocs(collection(db, "zones"));
+        setTotalZoneCount(snapshot.size);
+      } catch (error) {
+        console.error("구역 수 조회 에러:", error);
+      }
+    }
+
+    fetchZoneCount();
+  }, []);
 
   useEffect(() => {
     async function fetchVisitLogs() {
@@ -1061,7 +1075,7 @@ export default function VisitsPage() {
 
       for (
         let zoneNumber = 1;
-        zoneNumber <= TOTAL_ZONE_COUNT;
+        zoneNumber <= totalZoneCount;
         zoneNumber += 1
       ) {
         const firstRow = firstDataRowTemplate.cloneNode(true) as Element;
