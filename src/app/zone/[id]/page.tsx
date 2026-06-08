@@ -535,7 +535,7 @@ export default function ZoneDetailPage() {
                       alt={zone.name}
                       width={1600}
                       height={1200}
-                      className="h-auto max-h-[72vh] w-full object-contain select-none contrast-[0.7]"
+                      className="h-auto max-h-[72vh] w-full object-contain select-none [filter:brightness(0.92)_contrast(1.35)_saturate(0.9)]"
                       priority
                     />
                   </button>
@@ -768,7 +768,7 @@ export default function ZoneDetailPage() {
               alt={zone.name}
               width={1800}
               height={1400}
-              className="rotate-90 object-contain select-none contrast-[0.7]"
+              className="rotate-90 object-contain select-none [filter:brightness(0.92)_contrast(1.35)_saturate(0.9)]"
               style={{
                 width: "100dvh",
                 height: "100dvw",
