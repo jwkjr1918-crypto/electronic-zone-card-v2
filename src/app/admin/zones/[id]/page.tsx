@@ -20,8 +20,6 @@ import {
   Save,
   Image as ImageIcon,
   MapPin,
-  ScanText,
-  Loader2,
   RotateCcw,
 } from "lucide-react";
 
@@ -120,125 +118,6 @@ const compressImage = (file: File): Promise<File> => {
   });
 };
 
-function normalizeAddressText(text: string) {
-  return text
-    .replace(/[|]/g, "1")
-    .replace(/[Il]/g, "1")
-    .replace(/[０-９]/g, (char) =>
-      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
-    )
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{2,}/g, "\n")
-    .trim();
-}
-
-function extractAddressesFromText(text: string) {
-  const normalizedText = normalizeAddressText(text);
-  const found: string[] = [];
-
-  function addAddress(address: string) {
-    const cleaned = address
-      .replace(/\s*-\s*/g, "-")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (
-      cleaned.length >= 4 &&
-      /\d/.test(cleaned) &&
-      !/^\d/.test(cleaned) &&
-      !found.includes(cleaned)
-    ) {
-      found.push(cleaned);
-    }
-  }
-
-  function cleanRoadLine(line: string) {
-    return line
-      .replace(/[^가-힣0-9]/g, "")
-      .replace(/대개로/g, "대게로")
-      .trim();
-  }
-
-  function cleanNumberLine(line: string) {
-    return line
-      .replace(/[^0-9-]/g, "")
-      .replace(/--+/g, "-")
-      .replace(/^-|-$/g, "")
-      .trim();
-  }
-
-  const roadPattern = /^[가-힣0-9]{1,18}(?:대로|번길|길|로)$/;
-  const numberPattern = /^\d{1,5}(?:-\d{1,5})?$/;
-
-  const rawLines = normalizedText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const compactLines = rawLines.map((line) => ({
-    raw: line,
-    road: cleanRoadLine(line),
-    number: cleanNumberLine(line),
-  }));
-
-  for (let index = 0; index < compactLines.length; index += 1) {
-    const current = compactLines[index];
-
-    if (!roadPattern.test(current.road)) continue;
-
-    for (
-      let nextIndex = index + 1;
-      nextIndex < Math.min(index + 4, compactLines.length);
-      nextIndex += 1
-    ) {
-      const next = compactLines[nextIndex];
-
-      if (numberPattern.test(next.number)) {
-        addAddress(`${current.road} ${next.number}`);
-        break;
-      }
-    }
-  }
-
-  const singleLineText = normalizedText.replace(/\n/g, " ");
-  const compactText = normalizedText.replace(/\s+/g, "");
-
-  const normalPatterns = [
-    /[가-힣0-9]{1,18}(?:대로|번길|길|로)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
-    /[가-힣0-9]{1,18}(?:리|동)\s*\d{1,5}(?:\s*-\s*\d{1,5})?/g,
-  ];
-
-  normalPatterns.forEach((pattern) => {
-    const matches = singleLineText.match(pattern) || [];
-    matches.forEach(addAddress);
-  });
-
-  const compactPatterns = [
-    /[가-힣0-9]{1,18}(?:대로|번길|길|로)\d{1,5}(?:-\d{1,5})?/g,
-    /[가-힣0-9]{1,18}(?:리|동)\d{1,5}(?:-\d{1,5})?/g,
-  ];
-
-  compactPatterns.forEach((pattern) => {
-    const matches = compactText.match(pattern) || [];
-
-    matches.forEach((match) => {
-      const formatted = match.replace(
-        /^([가-힣0-9]+(?:대로|번길|길|로|리|동))(\d.*)$/,
-        "$1 $2"
-      );
-
-      addAddress(formatted);
-    });
-  });
-
-  console.log("OCR 원문:", text);
-  console.log("OCR 줄 목록:", rawLines);
-  console.log("주소 추출 결과:", found);
-
-  return found;
-}
-
 function addressesToTextarea(addresses?: string[]) {
   if (!Array.isArray(addresses)) return "";
 
@@ -259,279 +138,6 @@ function textareaToAddresses(value: string) {
   );
 }
 
-function loadImageFromFile(file: File) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new window.Image();
-
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-
-    image.onerror = (error) => {
-      URL.revokeObjectURL(objectUrl);
-      reject(error);
-    };
-
-    image.src = objectUrl;
-  });
-}
-
-function loadImageFromUrl(imageUrl: string) {
-  return new Promise<HTMLImageElement>(async (resolve, reject) => {
-    try {
-      const response = await fetch(imageUrl);
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const image = new window.Image();
-
-      image.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve(image);
-      };
-
-      image.onerror = (error) => {
-        URL.revokeObjectURL(objectUrl);
-        reject(error);
-      };
-
-      image.src = objectUrl;
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function findDarkTextCrops(image: HTMLImageElement) {
-  const maxAnalysisWidth = 1400;
-  const analysisScale = Math.min(maxAnalysisWidth / image.naturalWidth, 1);
-  const analysisWidth = Math.round(image.naturalWidth * analysisScale);
-  const analysisHeight = Math.round(image.naturalHeight * analysisScale);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = analysisWidth;
-  canvas.height = analysisHeight;
-
-  const ctx = canvas.getContext("2d", {
-    willReadFrequently: true,
-  });
-
-  if (!ctx) {
-    throw new Error("이미지 분석에 실패했습니다.");
-  }
-
-  ctx.drawImage(image, 0, 0, analysisWidth, analysisHeight);
-
-  const imageData = ctx.getImageData(0, 0, analysisWidth, analysisHeight);
-  const data = imageData.data;
-  const cellSize = 24;
-  const cols = Math.ceil(analysisWidth / cellSize);
-  const rows = Math.ceil(analysisHeight / cellSize);
-  const active = Array.from({ length: rows }, () => Array(cols).fill(false));
-
-  for (let y = 0; y < analysisHeight; y += 2) {
-    for (let x = 0; x < analysisWidth; x += 2) {
-      const index = (y * analysisWidth + x) * 4;
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-
-      const isDark = r < 90 && g < 90 && b < 90;
-      const isBlueTitle = b > 110 && r < 120;
-      const isBrownLine = r > 80 && r < 180 && g > 30 && g < 120 && b < 80;
-
-      if (!isDark || isBlueTitle || isBrownLine) continue;
-
-      const col = Math.floor(x / cellSize);
-      const row = Math.floor(y / cellSize);
-
-      active[row][col] = true;
-    }
-  }
-
-  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
-  const boxes: Array<{ x: number; y: number; width: number; height: number }> =
-    [];
-
-  const directions = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ];
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      if (!active[row][col] || visited[row][col]) continue;
-
-      const queue = [[row, col]];
-      visited[row][col] = true;
-
-      let minRow = row;
-      let maxRow = row;
-      let minCol = col;
-      let maxCol = col;
-
-      while (queue.length > 0) {
-        const [currentRow, currentCol] = queue.shift() as number[];
-
-        minRow = Math.min(minRow, currentRow);
-        maxRow = Math.max(maxRow, currentRow);
-        minCol = Math.min(minCol, currentCol);
-        maxCol = Math.max(maxCol, currentCol);
-
-        directions.forEach(([dr, dc]) => {
-          const nextRow = currentRow + dr;
-          const nextCol = currentCol + dc;
-
-          if (
-            nextRow < 0 ||
-            nextRow >= rows ||
-            nextCol < 0 ||
-            nextCol >= cols ||
-            visited[nextRow][nextCol] ||
-            !active[nextRow][nextCol]
-          ) {
-            return;
-          }
-
-          visited[nextRow][nextCol] = true;
-          queue.push([nextRow, nextCol]);
-        });
-      }
-
-      const padding = 48;
-      const x = Math.max(0, minCol * cellSize - padding);
-      const y = Math.max(0, minRow * cellSize - padding);
-      const width = Math.min(
-        analysisWidth - x,
-        (maxCol - minCol + 1) * cellSize + padding * 2
-      );
-      const height = Math.min(
-        analysisHeight - y,
-        (maxRow - minRow + 1) * cellSize + padding * 2
-      );
-
-      if (width < 45 || height < 30) continue;
-      if (width > analysisWidth * 0.55 || height > analysisHeight * 0.3) continue;
-
-      boxes.push({ x, y, width, height });
-    }
-  }
-
-  const expandedBoxes = boxes.map((box) => ({
-    x: Math.max(0, box.x - 24),
-    y: Math.max(0, box.y - 24),
-    width: Math.min(analysisWidth - Math.max(0, box.x - 24), box.width + 48),
-    height: Math.min(analysisHeight - Math.max(0, box.y - 24), box.height + 48),
-  }));
-
-  const merged: Array<{ x: number; y: number; width: number; height: number }> =
-    [];
-
-  function intersectsOrClose(
-    a: { x: number; y: number; width: number; height: number },
-    b: { x: number; y: number; width: number; height: number }
-  ) {
-    const gap = 70;
-
-    return !(
-      a.x + a.width + gap < b.x ||
-      b.x + b.width + gap < a.x ||
-      a.y + a.height + gap < b.y ||
-      b.y + b.height + gap < a.y
-    );
-  }
-
-  expandedBoxes.forEach((box) => {
-    const targetIndex = merged.findIndex((item) =>
-      intersectsOrClose(item, box)
-    );
-
-    if (targetIndex === -1) {
-      merged.push(box);
-      return;
-    }
-
-    const target = merged[targetIndex];
-    const x1 = Math.min(target.x, box.x);
-    const y1 = Math.min(target.y, box.y);
-    const x2 = Math.max(target.x + target.width, box.x + box.width);
-    const y2 = Math.max(target.y + target.height, box.y + box.height);
-
-    merged[targetIndex] = {
-      x: x1,
-      y: y1,
-      width: x2 - x1,
-      height: y2 - y1,
-    };
-  });
-
-  return merged
-    .filter((box) => box.width >= 70 && box.height >= 45)
-    .sort((a, b) => a.y - b.y || a.x - b.x)
-    .slice(0, 24)
-    .map((box) => ({
-      x: Math.round(box.x / analysisScale),
-      y: Math.round(box.y / analysisScale),
-      width: Math.round(box.width / analysisScale),
-      height: Math.round(box.height / analysisScale),
-    }));
-}
-
-function createOcrCropDataUrl(
-  image: HTMLImageElement,
-  crop: { x: number; y: number; width: number; height: number }
-) {
-  const scale = 4;
-  const canvas = document.createElement("canvas");
-  canvas.width = crop.width * scale;
-  canvas.height = crop.height * scale;
-
-  const ctx = canvas.getContext("2d", {
-    willReadFrequently: true,
-  });
-
-  if (!ctx) {
-    throw new Error("OCR crop 생성에 실패했습니다.");
-  }
-
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(
-    image,
-    crop.x,
-    crop.y,
-    crop.width,
-    crop.height,
-    0,
-    0,
-    canvas.width,
-    canvas.height
-  );
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-
-  for (let index = 0; index < data.length; index += 4) {
-    const gray =
-      data[index] * 0.299 +
-      data[index + 1] * 0.587 +
-      data[index + 2] * 0.114;
-
-    const contrast = (gray - 128) * 2.1 + 128;
-    const value = contrast > 155 ? 255 : 0;
-
-    data[index] = value;
-    data[index + 1] = value;
-    data[index + 2] = value;
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-
-  return canvas.toDataURL("image/png");
-}
-
 export default function AdminZoneEditPage() {
   const params = useParams();
   const router = useRouter();
@@ -547,13 +153,6 @@ export default function AdminZoneEditPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [extractingAddresses, setExtractingAddresses] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState("");
-  const [selectedOriginalFile, setSelectedOriginalFile] = useState<File | null>(
-    null
-  );
-  const [ocrDebugText, setOcrDebugText] = useState("");
-  const [ocrCropCount, setOcrCropCount] = useState(0);
 
   const addressPreview = useMemo(() => {
     return textareaToAddresses(addressText);
@@ -612,9 +211,6 @@ export default function AdminZoneEditPage() {
     if (!file) return;
 
     try {
-      setSelectedOriginalFile(file);
-      setOcrDebugText("");
-      setOcrCropCount(0);
       setUploading(true);
 
       const compressedFile = await compressImage(file);
@@ -640,91 +236,6 @@ export default function AdminZoneEditPage() {
       alert("이미지 업로드 실패");
     } finally {
       setUploading(false);
-    }
-  }
-
-  async function handleExtractAddresses() {
-    if (!selectedOriginalFile && !imageUrl) {
-      alert("먼저 구역 이미지를 선택하거나 업로드해주세요.");
-      return;
-    }
-
-    try {
-      setExtractingAddresses(true);
-      setOcrDebugText("");
-      setOcrCropCount(0);
-      setOcrProgress("원본 이미지에서 주소 글씨 영역을 찾는 중...");
-
-      const { recognize } = await import("tesseract.js");
-
-      const image = selectedOriginalFile
-        ? await loadImageFromFile(selectedOriginalFile)
-        : await loadImageFromUrl(imageUrl);
-
-      const crops = findDarkTextCrops(image);
-
-      setOcrCropCount(crops.length);
-
-      if (crops.length === 0) {
-        alert(
-          "검은 글씨 영역을 찾지 못했습니다.\n이미지의 주소 글씨가 너무 작거나 흐릴 수 있습니다."
-        );
-        return;
-      }
-
-      const allTexts: string[] = [];
-
-      for (let index = 0; index < crops.length; index += 1) {
-        setOcrProgress(
-          `주소 후보 영역 OCR 중... ${index + 1}/${crops.length}`
-        );
-
-        const cropDataUrl = createOcrCropDataUrl(image, crops[index]);
-
-        const result = await recognize(cropDataUrl, "kor+eng", {
-          logger: (message) => {
-            if (message.status === "recognizing text") {
-              const progress = Math.round((message.progress || 0) * 100);
-              setOcrProgress(
-                `주소 후보 영역 OCR 중... ${index + 1}/${crops.length} (${progress}%)`
-              );
-            }
-          },
-        });
-
-        const text = result.data.text.trim();
-
-        if (text) {
-          allTexts.push(text);
-        }
-      }
-
-      const combinedText = allTexts.join("\n");
-      const extracted = extractAddressesFromText(combinedText);
-
-      setOcrDebugText(combinedText || "OCR이 읽은 텍스트가 없습니다.");
-
-      if (extracted.length === 0) {
-        alert(
-          "주소를 자동으로 찾지 못했습니다.\n아래 OCR 원문을 참고해서 주소를 직접 입력해주세요."
-        );
-        return;
-      }
-
-      const currentAddresses = textareaToAddresses(addressText);
-      const merged = Array.from(new Set([...currentAddresses, ...extracted]));
-
-      setAddressText(merged.join("\n"));
-
-      alert(
-        `주소 후보 ${extracted.length}개를 찾았습니다.\n내용을 확인한 뒤 저장해주세요.`
-      );
-    } catch (error) {
-      console.error("주소 OCR 추출 에러:", error);
-      alert("주소 자동 추출 실패");
-    } finally {
-      setExtractingAddresses(false);
-      setOcrProgress("");
     }
   }
 
@@ -841,7 +352,7 @@ export default function AdminZoneEditPage() {
                 type="file"
                 accept="image/*"
                 onChange={handleImageUpload}
-                disabled={uploading || saving || extractingAddresses}
+                disabled={uploading || saving}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 disabled:opacity-50"
               />
 
@@ -865,7 +376,6 @@ export default function AdminZoneEditPage() {
 
               <p className="mt-2 text-xs text-slate-400">
                 새 이미지는 최대 가로 2200px, JPEG 품질 0.88로 압축됩니다.
-                주소 추출은 가능하면 방금 선택한 원본 파일 기준으로 실행됩니다.
               </p>
             </div>
 
@@ -882,60 +392,22 @@ export default function AdminZoneEditPage() {
                   </p>
                 </div>
 
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleExtractAddresses}
-                    disabled={
-                      (!imageUrl && !selectedOriginalFile) ||
-                      uploading ||
-                      saving ||
-                      extractingAddresses
-                    }
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow disabled:opacity-50"
-                  >
-                    {extractingAddresses ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : (
-                      <ScanText size={15} />
-                    )}
-                    주소 영역 추출
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleClearAddresses}
-                    disabled={saving || extractingAddresses || !addressText}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow disabled:opacity-50"
-                  >
-                    <RotateCcw size={15} />
-                    비우기
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleClearAddresses}
+                  disabled={saving || !addressText}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow disabled:opacity-50"
+                >
+                  <RotateCcw size={15} />
+                  비우기
+                </button>
               </div>
 
-              {ocrProgress && (
-                <div className="mt-3 rounded-2xl bg-white px-3 py-2 text-sm text-slate-600 shadow-sm">
-                  {ocrProgress}
-                  {ocrCropCount > 0 ? ` / 후보 영역 ${ocrCropCount}개` : ""}
-                </div>
-              )}
-
-              {ocrDebugText && (
-                <details className="mt-3 rounded-2xl bg-white p-3 text-xs text-slate-600 shadow-sm">
-                  <summary className="cursor-pointer font-bold text-slate-800">
-                    OCR 원문 보기
-                  </summary>
-                  <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-100 p-3">
-                    {ocrDebugText}
-                  </pre>
-                </details>
-              )}
 
               <textarea
                 value={addressText}
                 onChange={(event) => setAddressText(event.target.value)}
-                disabled={saving || extractingAddresses}
+                disabled={saving}
                 rows={6}
                 className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none disabled:opacity-50"
                 placeholder={`예시:\n금천3길 121\n금천3길 96\n금천3길 118-14`}
@@ -963,7 +435,7 @@ export default function AdminZoneEditPage() {
 
             <button
               onClick={handleSave}
-              disabled={saving || uploading || extractingAddresses}
+              disabled={saving || uploading}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 py-4 text-white hover:bg-slate-800 disabled:opacity-50"
             >
               <Save size={18} />
