@@ -437,6 +437,42 @@ export default function ZoneDetailPage() {
     try {
       setSavingVisit(true);
 
+      const latestVisitSnapshot = await getDocs(
+        query(
+          collection(db, "visitLogs"),
+          where("zoneId", "==", id),
+          orderBy("createdAt", "desc"),
+          limit(1)
+        )
+      );
+
+      if (!latestVisitSnapshot.empty) {
+        const latestVisit = latestVisitSnapshot.docs[0].data() as VisitLog;
+
+        if (latestVisit.createdAt?.seconds) {
+          const latestDate = new Date(
+            latestVisit.createdAt.seconds * 1000
+          );
+
+          const nextAvailableDate = addMonths(
+            latestDate,
+            visitLockMonths
+          );
+
+          if (new Date() < nextAvailableDate) {
+            setSavingVisit(false);
+
+            alert(
+              `이미 완료된 구역입니다.\n\n최근 방문자: ${
+                latestVisit.visitorName ?? "-"
+              }\n다음 완료 가능일: ${formatDate(nextAvailableDate)}`
+            );
+
+            return;
+          }
+        }
+      }
+
       await addDoc(collection(db, "visitLogs"), {
         zoneId: id,
         zoneName: zone.name,
