@@ -385,7 +385,7 @@ export default function LeaderPage() {
         visitSnapshot.docs.forEach((visitDoc) => {
           const log = visitDoc.data() as VisitLogData;
 
-          // 예전 오류로 만들어진 방문자 이름 없는 기록은
+          // 예전 오류로 만들어진 인도자 이름 없는 기록은
           // 인도자 화면에서 완료 기록으로 보지 않습니다.
           if (!hasVisitorName(log)) return;
 

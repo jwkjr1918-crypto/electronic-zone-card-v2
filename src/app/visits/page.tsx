@@ -502,7 +502,7 @@ export default function VisitsPage() {
     }
 
     if (!nextVisitorName) {
-      alert("방문자 이름을 입력해주세요.");
+      alert("인도자 이름을 입력해주세요.");
       return;
     }
 
@@ -629,7 +629,7 @@ export default function VisitsPage() {
     }
 
     const ok = confirm(
-      `선택한 ${targetLogs.length}개 구역을 방문완료 처리할까요?\n\n방문자 이름: ${bulkVisitorName}`,
+      `선택한 ${targetLogs.length}개 구역을 방문완료 처리할까요?\n\n인도자 이름: ${bulkVisitorName}`,
     );
 
     if (!ok) return;
@@ -717,7 +717,7 @@ export default function VisitsPage() {
     }
 
     const nextVisitorName = prompt(
-      `선택한 ${selectedLogs.length}개 방문 기록의 방문자 이름을 바꾸려면 입력해주세요.
+      `선택한 ${selectedLogs.length}개 방문 기록의 인도자 이름을 바꾸려면 입력해주세요.
 이름은 그대로 두려면 빈칸으로 확인을 누르세요.`,
       "",
     );
@@ -737,7 +737,7 @@ export default function VisitsPage() {
     const trimmedDateValue = nextDateValue.trim();
 
     if (!trimmedName && !trimmedDateValue) {
-      alert("수정할 방문자 이름이나 날짜를 입력해주세요.");
+      alert("수정할 인도자 이름이나 날짜를 입력해주세요.");
       return;
     }
 
@@ -774,7 +774,7 @@ export default function VisitsPage() {
     ];
 
     if (trimmedName) {
-      confirmLines.push(`방문자 이름: ${trimmedName}`);
+      confirmLines.push(`인도자 이름: ${trimmedName}`);
     }
 
     if (nextDate) {
@@ -1424,7 +1424,7 @@ export default function VisitsPage() {
                           {latestLog.visitorName && (
                             <span className="flex items-center gap-1 font-medium text-slate-700">
                               <User size={13} />
-                              최근 방문자: {latestLog.visitorName}
+                              최근 인도자: {latestLog.visitorName}
                             </span>
                           )}
 
@@ -1485,7 +1485,7 @@ export default function VisitsPage() {
                                     {log.visitorName && (
                                       <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
                                         <User size={14} />
-                                        방문자: {log.visitorName}
+                                        인도자: {log.visitorName}
                                       </div>
                                     )}
 
@@ -1534,7 +1534,7 @@ export default function VisitsPage() {
                                           event.target.value,
                                         )
                                       }
-                                      placeholder="방문자 이름"
+                                      placeholder="인도자 이름"
                                       className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
                                     />
 

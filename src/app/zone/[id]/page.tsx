@@ -463,7 +463,7 @@ export default function ZoneDetailPage() {
             setSavingVisit(false);
 
             alert(
-              `이미 완료된 구역입니다.\n\n최근 방문자: ${
+              `이미 완료된 구역입니다.\n\n최근 인도자: ${
                 latestVisit.visitorName ?? "-"
               }\n다음 완료 가능일: ${formatDate(nextAvailableDate)}`
             );
@@ -758,7 +758,7 @@ export default function ZoneDetailPage() {
 
                 {recentVisit.visitorName && (
                   <p className="mt-1 text-sm font-medium text-slate-700">
-                    방문자: {recentVisit.visitorName}
+                    인도자: {recentVisit.visitorName}
                   </p>
                 )}
 

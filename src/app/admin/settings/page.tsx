@@ -716,14 +716,14 @@ export default function AdminSettingsPage() {
 
               <p className="mt-1 text-sm text-slate-500">
                 구역 관리에서 여러 구역을 선택 방문완료 처리할 때 저장될
-                방문자 이름입니다.
+                인도자 이름입니다.
               </p>
             </div>
           </div>
 
           <div className="space-y-3">
             <label className="block text-sm font-semibold text-slate-700">
-              기본 방문자 이름
+              기본 인도자 이름
             </label>
 
             <Input
