@@ -468,6 +468,8 @@ export default function ZoneDetailPage() {
               }\n다음 완료 가능일: ${formatDate(nextAvailableDate)}`
             );
 
+            window.location.reload();
+
             return;
           }
         }
