@@ -868,7 +868,7 @@ export default function LeaderPage() {
                       ? "border-red-300 bg-red-50 ring-1 ring-red-100"
                       : isActive
                         ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
-                        : isVisited
+                        : isVisited && !isVisitExpired
                           ? "border-slate-200 bg-slate-50 opacity-85"
                           : "border-slate-200 bg-white"
                   }`}
@@ -923,7 +923,7 @@ export default function LeaderPage() {
                           className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
                             isActive
                               ? "bg-emerald-600 text-white"
-                              : isVisited
+                              : isVisited && !isVisitExpired
                                 ? "bg-slate-200 text-slate-600"
                                 : "bg-blue-50 text-blue-700"
                           }`}
