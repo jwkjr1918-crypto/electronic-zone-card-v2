@@ -882,7 +882,7 @@ export default function LeaderPage() {
                               ? "bg-red-600"
                               : isActive
                                 ? "bg-emerald-600"
-                                : isVisited
+                                : isVisited && !isVisitExpired
                                   ? "bg-slate-500"
                                   : "bg-slate-900"
                           }`}
@@ -897,7 +897,7 @@ export default function LeaderPage() {
                                 ? "text-red-900"
                                 : isActive
                                   ? "text-emerald-950"
-                                  : isVisited
+                                  : isVisited && !isVisitExpired
                                     ? "text-slate-700"
                                     : "text-slate-900"
                             }`}
@@ -946,11 +946,7 @@ export default function LeaderPage() {
                           )}
                         </div>
 
-                        {isVisitExpired && passedMonths !== null && (
-                          <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
-                            {passedMonths}개월 지남
-                          </div>
-                        )}
+                        
                       </div>
                     </div>
 
@@ -960,7 +956,7 @@ export default function LeaderPage() {
                           ? "bg-red-100/60"
                           : isActive
                             ? "bg-white/80"
-                            : isVisited
+                            : isVisited && !isVisitExpired
                               ? "bg-slate-100"
                               : "bg-slate-50"
                       }`}
@@ -975,7 +971,7 @@ export default function LeaderPage() {
                             ? "text-red-800"
                             : isActive
                               ? "text-emerald-800"
-                              : isVisited
+                              : isVisited && !isVisitExpired
                                 ? "text-slate-700"
                                 : "text-slate-600"
                         }`}
