@@ -299,7 +299,7 @@ export default function LeaderPage() {
   const [search, setSearch] = useState("");
 
   const [selectedRegionGroup, setSelectedRegionGroup] =
-    useState<RegionGroup>("전체");
+    useState<RegionGroup>("후포지역");
 
   const [selectedSubRegion, setSelectedSubRegion] = useState("전체");
 
@@ -318,7 +318,7 @@ export default function LeaderPage() {
         setSelectedRegionGroup(
           isRegionGroup(saved.selectedRegionGroup)
             ? saved.selectedRegionGroup
-            : "전체",
+            : "후포지역",
         );
         setSelectedSubRegion(saved.selectedSubRegion ?? "전체");
         setSortType(isSortType(saved.sortType) ? saved.sortType : "todo");
@@ -769,7 +769,7 @@ export default function LeaderPage() {
 
             <Tabs value={selectedRegionGroup} className="mb-2">
               <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
-                {["전체", "후포지역", "영해지역"].map((regionGroup) => (
+                {["후포지역", "영해지역", "전체"].map((regionGroup) => (
                   <TabsTrigger
                     key={regionGroup}
                     value={regionGroup}
