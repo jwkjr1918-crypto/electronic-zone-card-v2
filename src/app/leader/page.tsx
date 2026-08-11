@@ -1581,17 +1581,6 @@ export default function LeaderPage() {
                               </>
                             )}
                           </div>
-
-                          {isVisitExpired &&
-                            passedMonths !==
-                              null && (
-                              <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
-                                {
-                                  passedMonths
-                                }
-                                개월 지남
-                              </div>
-                            )}
                         </div>
                       </div>
 
