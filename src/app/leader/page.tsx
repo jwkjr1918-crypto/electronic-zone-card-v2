@@ -17,7 +17,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
   query,
+  where,
+  limit,
   orderBy,
   Timestamp,
   onSnapshot,
@@ -370,56 +373,185 @@ export default function LeaderPage() {
           ...zoneDoc.data(),
         })) as Zone[];
 
-        const visitQuery = query(
+        // 전체 visitLogs를 매번 읽지 않습니다.
+        // 최근 6개월 기록만 한 번 조회하여 최근 방문 통계를 계산하고,
+        // 최근 6개월 내 기록이 없는 구역은 해당 구역의 최신 1건만 조회합니다.
+        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
+        const recentVisitQuery = query(
           collection(db, "visitLogs"),
+          where("createdAt", ">=", Timestamp.fromDate(recentVisitCutoffDate)),
           orderBy("createdAt", "desc"),
         );
 
-        const visitSnapshot = await getDocs(visitQuery);
+        const recentVisitSnapshot = await getDocs(recentVisitQuery);
 
         const latestVisitMap = new Map<string, Timestamp | null>();
         const visitCountMap = new Map<string, number>();
-        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
         let recentVisitCount = 0;
 
-        visitSnapshot.docs.forEach((visitDoc) => {
+        for (const visitDoc of recentVisitSnapshot.docs) {
           const log = visitDoc.data() as VisitLogData;
 
-          // 예전 오류로 만들어진 인도자 이름 없는 기록은
-          // 인도자 화면에서 완료 기록으로 보지 않습니다.
-          if (!hasVisitorName(log)) return;
+          if (!hasVisitorName(log)) continue;
+
+          const createdAtSeconds = log.createdAt?.seconds ?? 0;
+
+          // createdAt 내림차순이므로 6개월 이전 기록부터는 더 볼 필요가 없습니다.
+          if (
+            createdAtSeconds > 0 &&
+            createdAtSeconds * 1000 < recentVisitCutoffDate.getTime()
+          ) {
+            break;
+          }
 
           const keys = getVisitLogKeys(log);
+          if (keys.length === 0) continue;
 
-          if (keys.length === 0) return;
-
-          if (
-            log.createdAt?.seconds &&
-            log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()
-          ) {
-            recentVisitCount += 1;
-          }
+          recentVisitCount += 1;
 
           keys.forEach((key) => {
             visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
-
             if (!latestVisitMap.has(key)) {
               latestVisitMap.set(key, log.createdAt || null);
             }
           });
-        });
+        }
 
-        const zoneDataWithVisit = zoneData.map((zone) => {
-          const lookupKeys = getZoneLookupKeys(zone);
-          const latestVisit = getFirstMapValue(latestVisitMap, lookupKeys) || null;
-          const visitCount = getFirstMapValue(visitCountMap, lookupKeys) || 0;
+        // 최근 6개월 내 방문이 없는 구역만 최신 방문 1건을 확인합니다.
+        // 기존의 zoneId 기반 기록을 우선 사용하고, 오래된/레거시 기록은
+        // region + number / region + name 키를 순서대로 확인합니다.
 
-          return {
-            ...zone,
-            lastVisitedAt: visitCount > 0 ? latestVisit : null,
-            visitCount,
-          };
-        });
+        const fetchLatestVisit = async (zone: Zone) => {
+          const lookupQueries = [];
+
+          if (zone.firestoreId) {
+            lookupQueries.push(
+              query(
+                collection(db, "visitLogs"),
+                where("zoneId", "==", zone.firestoreId),
+                orderBy("createdAt", "desc"),
+                limit(10),
+              ),
+            );
+          }
+
+          const normalizedRegion = normalizeRegion(zone.region);
+
+          if (normalizedRegion && typeof zone.id === "number") {
+            lookupQueries.push(
+              query(
+                collection(db, "visitLogs"),
+                where("region", "==", normalizedRegion),
+                where("zoneNumber", "==", zone.id),
+                orderBy("createdAt", "desc"),
+                limit(10),
+              ),
+            );
+          }
+
+          if (normalizedRegion && zone.name) {
+            lookupQueries.push(
+              query(
+                collection(db, "visitLogs"),
+                where("region", "==", normalizedRegion),
+                where("zoneName", "==", zone.name),
+                orderBy("createdAt", "desc"),
+                limit(10),
+              ),
+            );
+          }
+
+          for (const lookupQuery of lookupQueries) {
+            const snapshot = await getDocs(lookupQuery);
+            const validDoc = snapshot.docs.find((visitDoc) =>
+              hasVisitorName(visitDoc.data() as VisitLogData),
+            );
+
+            if (validDoc) {
+              return validDoc.data() as VisitLogData;
+            }
+          }
+
+          return null;
+        };
+
+        // 오래된 방문 이력이 있는 구역의 정확한 방문횟수는
+        // 문서 전체를 읽지 않고 Firestore count aggregation으로 계산합니다.
+        const zoneDataWithVisit = await Promise.all(
+          zoneData.map(async (zone) => {
+            const lookupKeys = getZoneLookupKeys(zone);
+            let latestVisit =
+              getFirstMapValue(latestVisitMap, lookupKeys) || null;
+            let visitCount = getFirstMapValue(visitCountMap, lookupKeys) || 0;
+
+            if (!latestVisit) {
+              const latestLog = await fetchLatestVisit(zone);
+
+              if (latestLog) {
+                latestVisit = latestLog.createdAt || null;
+                visitCount = 1;
+              }
+            }
+
+            // 정확한 방문횟수가 필요한 기존 '할 일' 정렬을 유지합니다.
+            if (latestVisit) {
+              try {
+                const countQueries = [];
+
+                if (zone.firestoreId) {
+                  countQueries.push(
+                    query(
+                      collection(db, "visitLogs"),
+                      where("zoneId", "==", zone.firestoreId),
+                    ),
+                  );
+                }
+
+                const normalizedRegion = normalizeRegion(zone.region);
+
+                if (normalizedRegion && typeof zone.id === "number") {
+                  countQueries.push(
+                    query(
+                      collection(db, "visitLogs"),
+                      where("region", "==", normalizedRegion),
+                      where("zoneNumber", "==", zone.id),
+                    ),
+                  );
+                }
+
+                if (normalizedRegion && zone.name) {
+                  countQueries.push(
+                    query(
+                      collection(db, "visitLogs"),
+                      where("region", "==", normalizedRegion),
+                      where("zoneName", "==", zone.name),
+                    ),
+                  );
+                }
+
+                const countResults = await Promise.all(
+                  countQueries.map((countQuery) =>
+                    getCountFromServer(countQuery),
+                  ),
+                );
+
+                // 여러 식별자가 같은 문서를 가리킬 수 있으므로 최대값을 사용합니다.
+                visitCount = Math.max(
+                  visitCount,
+                  ...countResults.map((result) => result.data().count),
+                );
+              } catch (countError) {
+                console.warn("방문횟수 집계 실패:", countError);
+              }
+            }
+
+            return {
+              ...zone,
+              lastVisitedAt: latestVisit,
+              visitCount,
+            };
+          }),
+        );
 
         setZones(zoneDataWithVisit);
         setRecentSixMonthVisitCount(recentVisitCount);
