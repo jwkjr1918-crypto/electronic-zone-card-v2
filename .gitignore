@@ -43,4 +43,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 # Firebase admin keys
-scripts/*firebase-adminsdk*.json
+scripts/*firebase-adminsdk*.jsonserviceAccountKey.json
+migrateVisitStats.js
+diff.txt

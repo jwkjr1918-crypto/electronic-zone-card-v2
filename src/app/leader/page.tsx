@@ -18,8 +18,6 @@ import {
   getDoc,
   getDocs,
   query,
-  orderBy,
-  Timestamp,
   onSnapshot,
 } from "firebase/firestore";
 
@@ -27,13 +25,70 @@ import Link from "next/link";
 
 import { db } from "@/firebase/firebase";
 
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card";
+
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const HUPO_REGIONS = ["후포면", "평해읍", "온정면", "기성면"];
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
-const YEONGHAE_REGIONS = ["영해면", "병곡면", "창수면", "축산면"];
+const HUPO_REGIONS = [
+  "후포면",
+  "평해읍",
+  "온정면",
+  "기성면",
+];
+
+const YEONGHAE_REGIONS = [
+  "영해면",
+  "병곡면",
+  "창수면",
+  "축산면",
+];
+
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
+
+type RegionGroup =
+  | "후포지역"
+  | "영해지역"
+  | "전체";
+
+type SortType =
+  | "todo"
+  | "number"
+  | "oldest";
+
+interface Zone {
+  firestoreId: string;
+  id?: number;
+  name: string;
+  region: string;
+  lastVisitedAt?: {
+    seconds: number;
+    nanoseconds?: number;
+  } | null;
+  visitCount?: number;
+}
+
+interface ActiveZoneView {
+  zoneId?: string;
+  expiresAt?: number;
+}
+
+interface HomePageState {
+  search?: string;
+  selectedRegionGroup?: RegionGroup;
+  selectedSubRegion?: string;
+  sortType?: SortType;
+  showRecentOnly?: boolean;
+  scrollY?: number;
+}
 
 function normalizeRegion(region?: string) {
   const normalized = String(region ?? "")
@@ -52,13 +107,21 @@ function normalizeRegion(region?: string) {
   return normalized;
 }
 
-const DEFAULT_VISIT_LOCK_MONTHS = 3;
-const RECENT_VISIT_MONTHS = 6;
-
 function getMonthsAgo(months: number) {
   const date = new Date();
   date.setMonth(date.getMonth() - months);
   return date;
+}
+
+function getVisitedSeconds(zone: Zone) {
+  return zone.lastVisitedAt?.seconds ?? null;
+}
+
+function hasVisitRecord(zone: Zone) {
+  return (
+    Boolean(zone.lastVisitedAt?.seconds) &&
+    (zone.visitCount ?? 0) > 0
+  );
 }
 
 function isVisitedRecently(zone: Zone) {
@@ -67,177 +130,134 @@ function isVisitedRecently(zone: Zone) {
   if (!seconds) return false;
 
   const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setDate(
+    sevenDaysAgo.getDate() - 7,
+  );
 
-  return seconds * 1000 >= sevenDaysAgo.getTime();
+  return (
+    seconds * 1000 >= sevenDaysAgo.getTime()
+  );
 }
 
-const HOME_STATE_KEY = "electronicZoneCardLeaderState";
-
-type RegionGroup = "전체" | "후포지역" | "영해지역";
-
-type SortType = "todo" | "number" | "oldest";
-
-interface Zone {
-  firestoreId: string;
-  id?: number;
-  name: string;
-  region: string;
-  lastVisitedAt?: Timestamp | null;
-  visitCount?: number;
+function getZoneNumber(zone: Zone) {
+  return typeof zone.id === "number"
+    ? zone.id
+    : Number.MAX_SAFE_INTEGER;
 }
 
-interface VisitLogData {
-  zoneId?: string;
-  zoneNumber?: number;
-  zoneName?: string;
-  region?: string;
-  visitorName?: string;
-  createdAt?: Timestamp | null;
+function isRegionGroup(
+  value: unknown,
+): value is RegionGroup {
+  return (
+    value === "전체" ||
+    value === "후포지역" ||
+    value === "영해지역"
+  );
 }
 
-interface ActiveZoneView {
-  zoneId?: string;
-  expiresAt?: number;
+function isSortType(
+  value: unknown,
+): value is SortType {
+  return (
+    value === "todo" ||
+    value === "number" ||
+    value === "oldest"
+  );
 }
 
-interface HomePageState {
-  search?: string;
-  selectedRegionGroup?: RegionGroup;
-  selectedSubRegion?: string;
-  sortType?: SortType;
-  showRecentOnly?: boolean;
-  scrollY?: number;
-}
-
-function isRegionGroup(value: unknown): value is RegionGroup {
-  return value === "전체" || value === "후포지역" || value === "영해지역";
-}
-
-function isSortType(value: unknown): value is SortType {
-  return value === "todo" || value === "number" || value === "oldest";
-}
+const HOME_STATE_KEY =
+  "electronicZoneCardLeaderState";
 
 function getSavedHomeState() {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-  const saved = sessionStorage.getItem(HOME_STATE_KEY);
+  const saved =
+    sessionStorage.getItem(HOME_STATE_KEY);
 
   if (!saved) return null;
 
   try {
-    return JSON.parse(saved) as HomePageState;
+    return JSON.parse(
+      saved,
+    ) as HomePageState;
   } catch (error) {
-    console.error("메인화면 상태 읽기 실패:", error);
+    console.error(
+      "메인화면 상태 읽기 실패:",
+      error,
+    );
+
     return null;
   }
 }
 
-function saveHomeState(state: HomePageState) {
+function saveHomeState(
+  state: HomePageState,
+) {
   if (typeof window === "undefined") return;
 
-  sessionStorage.setItem(HOME_STATE_KEY, JSON.stringify(state));
-}
-
-function getZoneNumber(zone: Zone) {
-  return typeof zone.id === "number" ? zone.id : Number.MAX_SAFE_INTEGER;
-}
-
-function getVisitedSeconds(zone: Zone) {
-  return zone.lastVisitedAt?.seconds ?? null;
-}
-
-function hasVisitRecord(zone: Zone) {
-  return Boolean(zone.lastVisitedAt?.seconds) && (zone.visitCount ?? 0) > 0;
-}
-
-function hasVisitorName(log: VisitLogData) {
-  return String(log.visitorName ?? "").trim().length > 0;
-}
-
-function getVisitLogKeys(log: VisitLogData) {
-  const keys: string[] = [];
-
-  if (log.zoneId) {
-    keys.push(`id:${String(log.zoneId)}`);
-  }
-
-  const normalizedRegion = normalizeRegion(log.region);
-
-  if (normalizedRegion && typeof log.zoneNumber === "number") {
-    keys.push(`region:${normalizedRegion}|number:${log.zoneNumber}`);
-  }
-
-  if (normalizedRegion && log.zoneName) {
-    keys.push(`region:${normalizedRegion}|name:${String(log.zoneName)}`);
-  }
-
-  return keys;
-}
-
-function getZoneLookupKeys(zone: Zone) {
-  const keys = [`id:${zone.firestoreId}`];
-  const normalizedRegion = normalizeRegion(zone.region);
-
-  if (normalizedRegion && typeof zone.id === "number") {
-    keys.push(`region:${normalizedRegion}|number:${zone.id}`);
-  }
-
-  if (normalizedRegion && zone.name) {
-    keys.push(`region:${normalizedRegion}|name:${zone.name}`);
-  }
-
-  return keys;
-}
-
-function getFirstMapValue<T>(map: Map<string, T>, keys: string[]) {
-  for (const key of keys) {
-    if (map.has(key)) {
-      return map.get(key);
-    }
-  }
-
-  return undefined;
-}
-
-function isThreeMonthsPassed(zone: Zone, cutoffDate: Date) {
-  const seconds = getVisitedSeconds(zone);
-
-  if (!seconds) return false;
-
-  return seconds * 1000 <= cutoffDate.getTime();
+  sessionStorage.setItem(
+    HOME_STATE_KEY,
+    JSON.stringify(state),
+  );
 }
 
 function getPassedMonths(zone: Zone) {
-  const seconds = getVisitedSeconds(zone);
+  const seconds =
+    getVisitedSeconds(zone);
 
   if (!seconds) return null;
 
-  const visitedDate = new Date(seconds * 1000);
+  const visitedDate =
+    new Date(seconds * 1000);
+
   const now = new Date();
 
   let months =
-    (now.getFullYear() - visitedDate.getFullYear()) * 12 +
-    (now.getMonth() - visitedDate.getMonth());
+    (now.getFullYear() -
+      visitedDate.getFullYear()) *
+      12 +
+    (now.getMonth() -
+      visitedDate.getMonth());
 
-  if (now.getDate() < visitedDate.getDate()) {
+  if (
+    now.getDate() <
+    visitedDate.getDate()
+  ) {
     months -= 1;
   }
 
   return Math.max(months, 0);
 }
 
-function sortByZoneNumber(a: Zone, b: Zone) {
-  const numberDiff = getZoneNumber(a) - getZoneNumber(b);
+function sortByZoneNumber(
+  a: Zone,
+  b: Zone,
+) {
+  const numberDiff =
+    getZoneNumber(a) -
+    getZoneNumber(b);
 
-  if (numberDiff !== 0) return numberDiff;
+  if (numberDiff !== 0) {
+    return numberDiff;
+  }
 
-  return a.name.localeCompare(b.name, "ko");
+  return a.name.localeCompare(
+    b.name,
+    "ko",
+  );
 }
 
-function sortOldestZones(a: Zone, b: Zone) {
-  const aVisited = hasVisitRecord(a);
-  const bVisited = hasVisitRecord(b);
+function sortOldestZones(
+  a: Zone,
+  b: Zone,
+) {
+  const aVisited =
+    hasVisitRecord(a);
+
+  const bVisited =
+    hasVisitRecord(b);
 
   if (!aVisited && !bVisited) {
     return sortByZoneNumber(a, b);
@@ -247,262 +267,497 @@ function sortOldestZones(a: Zone, b: Zone) {
   if (!bVisited) return 1;
 
   const visitedDiff =
-    (a.lastVisitedAt?.seconds ?? 0) - (b.lastVisitedAt?.seconds ?? 0);
+    (a.lastVisitedAt?.seconds ?? 0) -
+    (b.lastVisitedAt?.seconds ?? 0);
 
-  if (visitedDiff !== 0) return visitedDiff;
-
-  return sortByZoneNumber(a, b);
-}
-
-function sortByVisitCountThenZoneNumber(a: Zone, b: Zone) {
-  const countDiff = (a.visitCount ?? 0) - (b.visitCount ?? 0);
-
-  if (countDiff !== 0) return countDiff;
+  if (visitedDiff !== 0) {
+    return visitedDiff;
+  }
 
   return sortByZoneNumber(a, b);
 }
 
-function sortByRecentVisit(a: Zone, b: Zone) {
+function sortByVisitCountThenZoneNumber(
+  a: Zone,
+  b: Zone,
+) {
+  const countDiff =
+    (a.visitCount ?? 0) -
+    (b.visitCount ?? 0);
+
+  if (countDiff !== 0) {
+    return countDiff;
+  }
+
+  return sortByZoneNumber(a, b);
+}
+
+function sortByRecentVisit(
+  a: Zone,
+  b: Zone,
+) {
   const visitedDiff =
-    (b.lastVisitedAt?.seconds ?? 0) - (a.lastVisitedAt?.seconds ?? 0);
+    (b.lastVisitedAt?.seconds ?? 0) -
+    (a.lastVisitedAt?.seconds ?? 0);
 
-  if (visitedDiff !== 0) return visitedDiff;
+  if (visitedDiff !== 0) {
+    return visitedDiff;
+  }
 
   return sortByZoneNumber(a, b);
 }
 
-function sortTodoZones(zones: Zone[], visitLockMonths: number) {
-  const cutoffDate = getMonthsAgo(visitLockMonths);
+function sortTodoZones(
+  zones: Zone[],
+  visitLockMonths: number,
+) {
+  const cutoffDate =
+    getMonthsAgo(
+      visitLockMonths,
+    );
 
   const unvisitedZones = zones
-    .filter((zone) => !hasVisitRecord(zone))
+    .filter(
+      (zone) =>
+        !hasVisitRecord(zone),
+    )
     .sort(sortByZoneNumber);
 
   const expiredZones = zones
-    .filter(
-      (zone) => hasVisitRecord(zone) && isThreeMonthsPassed(zone, cutoffDate),
-    )
-    .sort(sortByVisitCountThenZoneNumber);
+    .filter((zone) => {
+      const seconds =
+        getVisitedSeconds(zone);
 
-  return [...unvisitedZones, ...expiredZones];
+      return (
+        hasVisitRecord(zone) &&
+        Boolean(seconds) &&
+        seconds! * 1000 <=
+          cutoffDate.getTime()
+      );
+    })
+    .sort(
+      sortByVisitCountThenZoneNumber,
+    );
+
+  return [
+    ...unvisitedZones,
+    ...expiredZones,
+  ];
+}
+
+function getMonthKeysForRecentSixMonths() {
+  const keys: string[] = [];
+
+  const now = new Date();
+
+  for (let i = 0; i < 6; i += 1) {
+    const date = new Date(now);
+    date.setMonth(
+      date.getMonth() - i,
+    );
+
+    keys.push(
+      `${date.getFullYear()}-${String(
+        date.getMonth() + 1,
+      ).padStart(2, "0")}`,
+    );
+  }
+
+  return keys;
 }
 
 export default function LeaderPage() {
-  const restoredScrollRef = useRef(false);
-  const previousSortTypeRef = useRef<SortType | null>(null);
+  const restoredScrollRef =
+    useRef(false);
 
-  const [initialScrollY, setInitialScrollY] = useState(0);
-  const [stateHydrated, setStateHydrated] = useState(false);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [recentSixMonthVisitCount, setRecentSixMonthVisitCount] = useState(0);
-  const [activeZoneIds, setActiveZoneIds] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
+  const previousSortTypeRef =
+    useRef<SortType | null>(null);
 
-  const [selectedRegionGroup, setSelectedRegionGroup] =
-    useState<RegionGroup>("후포지역");
+  const [initialScrollY, setInitialScrollY] =
+    useState(0);
 
-  const [selectedSubRegion, setSelectedSubRegion] = useState("전체");
+  const [stateHydrated, setStateHydrated] =
+    useState(false);
 
-  const [sortType, setSortType] = useState<SortType>("todo");
-  const [showRecentOnly, setShowRecentOnly] = useState(false);
-  const [visitLockMonths, setVisitLockMonths] = useState(
+  const [zones, setZones] =
+    useState<Zone[]>([]);
+
+  const [
+    recentSixMonthVisitCount,
+    setRecentSixMonthVisitCount,
+  ] = useState(0);
+
+  const [
+    activeZoneIds,
+    setActiveZoneIds,
+  ] = useState<string[]>([]);
+
+  const [search, setSearch] =
+    useState("");
+
+  const [
+    selectedRegionGroup,
+    setSelectedRegionGroup,
+  ] = useState<RegionGroup>(
+    "후포지역",
+  );
+
+  const [
+    selectedSubRegion,
+    setSelectedSubRegion,
+  ] = useState("전체");
+
+  const [sortType, setSortType] =
+    useState<SortType>("todo");
+
+  const [
+    showRecentOnly,
+    setShowRecentOnly,
+  ] = useState(false);
+
+  const [
+    visitLockMonths,
+    setVisitLockMonths,
+  ] = useState(
     DEFAULT_VISIT_LOCK_MONTHS,
   );
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      const saved = getSavedHomeState();
+    const timeoutId =
+      window.setTimeout(() => {
+        const saved =
+          getSavedHomeState();
 
-      if (saved) {
-        setSearch(saved.search ?? "");
-        setSelectedRegionGroup(
-          isRegionGroup(saved.selectedRegionGroup)
-            ? saved.selectedRegionGroup
-            : "후포지역",
-        );
-        setSelectedSubRegion(saved.selectedSubRegion ?? "전체");
-        setSortType(isSortType(saved.sortType) ? saved.sortType : "todo");
-        setShowRecentOnly(saved.showRecentOnly === true);
-        setInitialScrollY(saved.scrollY ?? 0);
-      }
+        if (saved) {
+          setSearch(
+            saved.search ?? "",
+          );
 
-      setStateHydrated(true);
-    }, 0);
+          setSelectedRegionGroup(
+            isRegionGroup(
+              saved.selectedRegionGroup,
+            )
+              ? saved.selectedRegionGroup
+              : "후포지역",
+          );
+
+          setSelectedSubRegion(
+            saved.selectedSubRegion ??
+              "전체",
+          );
+
+          setSortType(
+            isSortType(saved.sortType)
+              ? saved.sortType
+              : "todo",
+          );
+
+          setShowRecentOnly(
+            saved.showRecentOnly ===
+              true,
+          );
+
+          setInitialScrollY(
+            saved.scrollY ?? 0,
+          );
+        }
+
+        setStateHydrated(true);
+      }, 0);
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(
+        timeoutId,
+      );
     };
   }, []);
 
+  /*
+   * settings/global
+   *
+   * 기존과 동일하게 1회만 읽음.
+   */
   useEffect(() => {
     async function fetchSettings() {
       try {
-        const settingsRef = doc(db, "settings", "global");
-        const settingsSnap = await getDoc(settingsRef);
-
-        if (settingsSnap.exists()) {
-          const data = settingsSnap.data();
-          const months = Number(
-            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
+        const settingsRef =
+          doc(
+            db,
+            "settings",
+            "global",
           );
 
-          setVisitLockMonths(
-            Number.isFinite(months) && months >= 0
-              ? months
-              : DEFAULT_VISIT_LOCK_MONTHS,
+        const settingsSnap =
+          await getDoc(
+            settingsRef,
           );
+
+        if (!settingsSnap.exists()) {
+          return;
         }
+
+        const data =
+          settingsSnap.data();
+
+        const months = Number(
+          data.visitLockMonths ??
+            DEFAULT_VISIT_LOCK_MONTHS,
+        );
+
+        setVisitLockMonths(
+          Number.isFinite(months) &&
+            months >= 0
+            ? months
+            : DEFAULT_VISIT_LOCK_MONTHS,
+        );
       } catch (error) {
-        console.error("방문완료 제한 설정 조회 에러:", error);
+        console.error(
+          "방문완료 제한 설정 조회 에러:",
+          error,
+        );
       }
     }
 
     fetchSettings();
   }, []);
 
+  /*
+   * zones 전체 조회
+   *
+   * visitLogs 전체 조회는 제거.
+   *
+   * visitCount / lastVisitedAt은
+   * 방문 완료 시 zones 문서에 기록됩니다.
+   */
   useEffect(() => {
     async function fetchZones() {
       try {
-        const querySnapshot = await getDocs(collection(db, "zones"));
+        const querySnapshot =
+          await getDocs(
+            collection(
+              db,
+              "zones",
+            ),
+          );
 
-        const zoneData = querySnapshot.docs.map((zoneDoc) => ({
-          firestoreId: zoneDoc.id,
-          ...zoneDoc.data(),
-        })) as Zone[];
+        const zoneData =
+          querySnapshot.docs.map(
+            (zoneDoc) => ({
+              firestoreId:
+                zoneDoc.id,
+              ...zoneDoc.data(),
+            }),
+          ) as Zone[];
 
-        const visitQuery = query(
-          collection(db, "visitLogs"),
-          orderBy("createdAt", "desc"),
-        );
-
-        const visitSnapshot = await getDocs(visitQuery);
-
-        const latestVisitMap = new Map<string, Timestamp | null>();
-        const visitCountMap = new Map<string, number>();
-        const recentVisitCutoffDate = getMonthsAgo(RECENT_VISIT_MONTHS);
-        let recentVisitCount = 0;
-
-        visitSnapshot.docs.forEach((visitDoc) => {
-          const log = visitDoc.data() as VisitLogData;
-
-          // 예전 오류로 만들어진 인도자 이름 없는 기록은
-          // 인도자 화면에서 완료 기록으로 보지 않습니다.
-          if (!hasVisitorName(log)) return;
-
-          const keys = getVisitLogKeys(log);
-
-          if (keys.length === 0) return;
-
-          if (
-            log.createdAt?.seconds &&
-            log.createdAt.seconds * 1000 >= recentVisitCutoffDate.getTime()
-          ) {
-            recentVisitCount += 1;
-          }
-
-          keys.forEach((key) => {
-            visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
-
-            if (!latestVisitMap.has(key)) {
-              latestVisitMap.set(key, log.createdAt || null);
-            }
-          });
-        });
-
-        const zoneDataWithVisit = zoneData.map((zone) => {
-          const lookupKeys = getZoneLookupKeys(zone);
-          const latestVisit = getFirstMapValue(latestVisitMap, lookupKeys) || null;
-          const visitCount = getFirstMapValue(visitCountMap, lookupKeys) || 0;
-
-          return {
-            ...zone,
-            lastVisitedAt: visitCount > 0 ? latestVisit : null,
-            visitCount,
-          };
-        });
-
-        setZones(zoneDataWithVisit);
-        setRecentSixMonthVisitCount(recentVisitCount);
+        setZones(zoneData);
       } catch (error) {
-        console.error("Firebase 에러:", error);
+        console.error(
+          "Firebase 에러:",
+          error,
+        );
       }
     }
 
     fetchZones();
   }, []);
 
+  /*
+   * 최근 6개월 방문 횟수
+   *
+   * 같은 구역을 여러 번 방문한 경우에도
+   * 각각 1회씩 그대로 합산됩니다.
+   *
+   * 예:
+   * 2026-06 = 20
+   * 2026-07 = 35
+   * 2026-08 = 10
+   * => 총 65회
+   *
+   * 기존 visitLogs 전체 조회 대신
+   * 월별 집계 문서 6개만 읽습니다.
+   */
   useEffect(() => {
-    let latestViews: ActiveZoneView[] = [];
+    async function fetchRecentSixMonthStats() {
+      try {
+        const monthKeys =
+          getMonthKeysForRecentSixMonths();
 
-    function updateActiveZones(views: ActiveZoneView[]) {
+        const snapshots =
+          await Promise.all(
+            monthKeys.map(
+              (monthKey) =>
+                getDoc(
+                  doc(
+                    db,
+                    "visitStats",
+                    monthKey,
+                  ),
+                ),
+            ),
+          );
+
+        const total =
+          snapshots.reduce(
+            (sum, snapshot) => {
+              if (!snapshot.exists()) {
+                return sum;
+              }
+
+              const count = Number(
+                snapshot.data()
+                  .visitCount ?? 0,
+              );
+
+              return (
+                sum +
+                (Number.isFinite(count)
+                  ? count
+                  : 0)
+              );
+            },
+            0,
+          );
+
+        setRecentSixMonthVisitCount(
+          total,
+        );
+      } catch (error) {
+        console.error(
+          "최근 6개월 방문 통계 조회 에러:",
+          error,
+        );
+      }
+    }
+
+    fetchRecentSixMonthStats();
+  }, []);
+
+  /*
+   * 현재 방문중인 구역
+   */
+  useEffect(() => {
+    let latestViews: ActiveZoneView[] =
+      [];
+
+    function updateActiveZones(
+      views: ActiveZoneView[],
+    ) {
       const now = Date.now();
 
       const ids = Array.from(
         new Set(
           views
             .filter(
-              (view) => view.zoneId && view.expiresAt && view.expiresAt > now,
+              (view) =>
+                view.zoneId &&
+                view.expiresAt &&
+                view.expiresAt >
+                  now,
             )
-            .map((view) => String(view.zoneId)),
+            .map((view) =>
+              String(view.zoneId),
+            ),
         ),
       );
 
       setActiveZoneIds(ids);
     }
 
-    const unsubscribe = onSnapshot(
-      collection(db, "activeZoneViews"),
-      (snapshot) => {
-        latestViews = snapshot.docs.map(
-          (viewDoc) => viewDoc.data() as ActiveZoneView,
-        );
+    const unsubscribe =
+      onSnapshot(
+        collection(
+          db,
+          "activeZoneViews",
+        ),
+        (snapshot) => {
+          latestViews =
+            snapshot.docs.map(
+              (viewDoc) =>
+                viewDoc.data() as ActiveZoneView,
+            );
 
         updateActiveZones(latestViews);
       },
     );
 
-    const interval = window.setInterval(() => {
-      updateActiveZones(latestViews);
-    }, 15000);
+    const interval =
+      window.setInterval(() => {
+        updateActiveZones(
+          latestViews,
+        );
+      }, 15000);
 
     return () => {
       unsubscribe();
-      window.clearInterval(interval);
+      window.clearInterval(
+        interval,
+      );
     };
   }, []);
 
+  /*
+   * 화면 상태 저장
+   */
   useEffect(() => {
-    if (typeof window === "undefined" || !stateHydrated) return;
+    if (
+      typeof window === "undefined" ||
+      !stateHydrated
+    ) {
+      return;
+    }
 
     let animationFrameId = 0;
 
     function saveCurrentState() {
-      window.cancelAnimationFrame(animationFrameId);
+      window.cancelAnimationFrame(
+        animationFrameId,
+      );
 
-      animationFrameId = window.requestAnimationFrame(() => {
-        saveHomeState({
-          search,
-          selectedRegionGroup,
-          selectedSubRegion,
-          sortType,
-          showRecentOnly,
-          scrollY: window.scrollY,
-        });
-      });
+      animationFrameId =
+        window.requestAnimationFrame(
+          () => {
+            saveHomeState({
+              search,
+              selectedRegionGroup,
+              selectedSubRegion,
+              sortType,
+              showRecentOnly,
+              scrollY:
+                window.scrollY,
+            });
+          },
+        );
     }
 
     saveCurrentState();
 
-    window.addEventListener("scroll", saveCurrentState, {
-      passive: true,
-    });
+    window.addEventListener(
+      "scroll",
+      saveCurrentState,
+      {
+        passive: true,
+      },
+    );
 
-    window.addEventListener("pagehide", saveCurrentState);
+    window.addEventListener(
+      "pagehide",
+      saveCurrentState,
+    );
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("scroll", saveCurrentState);
-      window.removeEventListener("pagehide", saveCurrentState);
+      window.cancelAnimationFrame(
+        animationFrameId,
+      );
+
+      window.removeEventListener(
+        "scroll",
+        saveCurrentState,
+      );
+
+      window.removeEventListener(
+        "pagehide",
+        saveCurrentState,
+      );
     };
   }, [
     search,
@@ -514,120 +769,246 @@ export default function LeaderPage() {
   ]);
 
   useEffect(() => {
-    if (restoredScrollRef.current) return;
-    if (zones.length === 0) return;
-
-    if (!initialScrollY || initialScrollY <= 0) {
-      restoredScrollRef.current = true;
+    if (
+      restoredScrollRef.current
+    ) {
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      window.scrollTo(0, initialScrollY);
-      restoredScrollRef.current = true;
-    }, 120);
+    if (zones.length === 0) {
+      return;
+    }
+
+    if (
+      !initialScrollY ||
+      initialScrollY <= 0
+    ) {
+      restoredScrollRef.current =
+        true;
+
+      return;
+    }
+
+    const timeoutId =
+      window.setTimeout(() => {
+        window.scrollTo(
+          0,
+          initialScrollY,
+        );
+
+        restoredScrollRef.current =
+          true;
+      }, 120);
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(
+        timeoutId,
+      );
     };
-  }, [zones.length, initialScrollY]);
-
-  const duplicateZoneIds = useMemo(() => {
-    const countMap = new Map<number, number>();
-
-    zones.forEach((zone) => {
-      if (typeof zone.id !== "number") return;
-
-      countMap.set(zone.id, (countMap.get(zone.id) || 0) + 1);
-    });
-
-    return new Set(
-      zones
-        .filter(
-          (zone) =>
-            typeof zone.id === "number" && (countMap.get(zone.id) || 0) > 1,
-        )
-        .map((zone) => zone.firestoreId),
-    );
-  }, [zones]);
-
-  const duplicateCount = duplicateZoneIds.size;
-
-  const recentVisitedZones = useMemo(
-    () => zones.filter((zone) => isVisitedRecently(zone)),
-    [zones],
-  );
-
-  const recentVisitedCount = recentVisitedZones.length;
-
-  const subRegions = useMemo(() => {
-    if (selectedRegionGroup === "후포지역") {
-      return ["전체", ...HUPO_REGIONS];
-    }
-
-    if (selectedRegionGroup === "영해지역") {
-      return ["전체", ...YEONGHAE_REGIONS];
-    }
-
-    return ["전체"];
-  }, [selectedRegionGroup]);
-
-  const filteredZones = useMemo(() => {
-    const baseFilteredZones = zones.filter((zone) => {
-      const matchesSearch =
-        zone.name.includes(search) || String(zone.id ?? "").includes(search);
-
-      const matchesRecent = !showRecentOnly || isVisitedRecently(zone);
-
-      let matchesRegion = true;
-
-      if (selectedRegionGroup === "후포지역") {
-        matchesRegion =
-          selectedSubRegion === "전체"
-            ? HUPO_REGIONS.includes(normalizeRegion(zone.region))
-            : normalizeRegion(zone.region) ===
-              normalizeRegion(selectedSubRegion);
-      }
-
-      if (selectedRegionGroup === "영해지역") {
-        matchesRegion =
-          selectedSubRegion === "전체"
-            ? YEONGHAE_REGIONS.includes(normalizeRegion(zone.region))
-            : normalizeRegion(zone.region) ===
-              normalizeRegion(selectedSubRegion);
-      }
-
-      return matchesSearch && matchesRegion && matchesRecent;
-    });
-
-    if (showRecentOnly) {
-      return [...baseFilteredZones].sort(sortByRecentVisit);
-    }
-
-    if (sortType === "todo") {
-      return sortTodoZones(baseFilteredZones, visitLockMonths);
-    }
-
-    if (sortType === "oldest") {
-      return [...baseFilteredZones].sort(sortOldestZones);
-    }
-
-    return [...baseFilteredZones].sort(sortByZoneNumber);
   }, [
-    zones,
-    search,
-    selectedRegionGroup,
-    selectedSubRegion,
-    sortType,
-    showRecentOnly,
-    visitLockMonths,
+    zones.length,
+    initialScrollY,
   ]);
 
-  const totalZoneCount = zones.length;
+  const duplicateZoneIds =
+    useMemo(() => {
+      const countMap =
+        new Map<number, number>();
+
+      zones.forEach((zone) => {
+        if (
+          typeof zone.id !==
+          "number"
+        ) {
+          return;
+        }
+
+        countMap.set(
+          zone.id,
+          (countMap.get(
+            zone.id,
+          ) || 0) + 1,
+        );
+      });
+
+      return new Set(
+        zones
+          .filter(
+            (zone) =>
+              typeof zone.id ===
+                "number" &&
+              (countMap.get(
+                zone.id,
+              ) || 0) > 1,
+          )
+          .map(
+            (zone) =>
+              zone.firestoreId,
+          ),
+      );
+    }, [zones]);
+
+  const duplicateCount =
+    duplicateZoneIds.size;
+
+  const recentVisitedZones =
+    useMemo(
+      () =>
+        zones.filter(
+          (zone) =>
+            isVisitedRecently(
+              zone,
+            ),
+        ),
+      [zones],
+    );
+
+  const recentVisitedCount =
+    recentVisitedZones.length;
+
+  const subRegions =
+    useMemo(() => {
+      if (
+        selectedRegionGroup ===
+        "후포지역"
+      ) {
+        return [
+          "전체",
+          ...HUPO_REGIONS,
+        ];
+      }
+
+      if (
+        selectedRegionGroup ===
+        "영해지역"
+      ) {
+        return [
+          "전체",
+          ...YEONGHAE_REGIONS,
+        ];
+      }
+
+      return ["전체"];
+    }, [selectedRegionGroup]);
+
+  const filteredZones =
+    useMemo(() => {
+      const baseFilteredZones =
+        zones.filter((zone) => {
+          const matchesSearch =
+            zone.name.includes(
+              search,
+            ) ||
+            String(
+              zone.id ?? "",
+            ).includes(search);
+
+          const matchesRecent =
+            !showRecentOnly ||
+            isVisitedRecently(
+              zone,
+            );
+
+          let matchesRegion =
+            true;
+
+          if (
+            selectedRegionGroup ===
+            "후포지역"
+          ) {
+            matchesRegion =
+              selectedSubRegion ===
+              "전체"
+                ? HUPO_REGIONS.includes(
+                    normalizeRegion(
+                      zone.region,
+                    ),
+                  )
+                : normalizeRegion(
+                    zone.region,
+                  ) ===
+                  normalizeRegion(
+                    selectedSubRegion,
+                  );
+          }
+
+          if (
+            selectedRegionGroup ===
+            "영해지역"
+          ) {
+            matchesRegion =
+              selectedSubRegion ===
+              "전체"
+                ? YEONGHAE_REGIONS.includes(
+                    normalizeRegion(
+                      zone.region,
+                    ),
+                  )
+                : normalizeRegion(
+                    zone.region,
+                  ) ===
+                  normalizeRegion(
+                    selectedSubRegion,
+                  );
+          }
+
+          return (
+            matchesSearch &&
+            matchesRegion &&
+            matchesRecent
+          );
+        });
+
+      if (showRecentOnly) {
+        return [
+          ...baseFilteredZones,
+        ].sort(sortByRecentVisit);
+      }
+
+      if (
+        sortType === "todo"
+      ) {
+        return sortTodoZones(
+          baseFilteredZones,
+          visitLockMonths,
+        );
+      }
+
+      if (
+        sortType === "oldest"
+      ) {
+        return [
+          ...baseFilteredZones,
+        ].sort(
+          sortOldestZones,
+        );
+      }
+
+      return [
+        ...baseFilteredZones,
+      ].sort(
+        sortByZoneNumber,
+      );
+    }, [
+      zones,
+      search,
+      selectedRegionGroup,
+      selectedSubRegion,
+      sortType,
+      showRecentOnly,
+      visitLockMonths,
+    ]);
+
+  const totalZoneCount =
+    zones.length;
 
   const recentSixMonthVisitPercent =
     totalZoneCount > 0
-      ? Math.round((recentSixMonthVisitCount / totalZoneCount) * 100)
+      ? Math.round(
+          (recentSixMonthVisitCount /
+            totalZoneCount) *
+            100,
+        )
       : 0;
 
   function saveStateBeforeNavigation() {
@@ -652,7 +1033,9 @@ export default function LeaderPage() {
                 className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
               >
                 <ClipboardList size={15} />
-                <span className="font-medium">방문기록</span>
+                <span className="font-medium">
+                  방문기록
+                </span>
               </Link>
 
               <Link
@@ -660,7 +1043,9 @@ export default function LeaderPage() {
                 className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
               >
                 <Shield size={15} />
-                <span className="font-medium">관리자</span>
+                <span className="font-medium">
+                  관리자
+                </span>
               </Link>
             </div>
 
@@ -679,7 +1064,8 @@ export default function LeaderPage() {
                 <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
                   최근6개월
                   <br />
-                  {recentSixMonthVisitCount}/{totalZoneCount} ·{" "}
+                  {recentSixMonthVisitCount}/
+                  {totalZoneCount} ·{" "}
                   {recentSixMonthVisitPercent}%
                 </div>
 
@@ -689,7 +1075,9 @@ export default function LeaderPage() {
                   </div>
 
                   <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
-                    {recentSixMonthVisitCount}
+                    {
+                      recentSixMonthVisitCount
+                    }
                     <span className="mx-1 text-sm font-bold text-slate-400">
                       /
                     </span>
@@ -699,7 +1087,10 @@ export default function LeaderPage() {
                   </div>
 
                   <div className="text-xs font-bold text-emerald-700 sm:text-sm">
-                    {recentSixMonthVisitPercent}%
+                    {
+                      recentSixMonthVisitPercent
+                    }
+                    %
                   </div>
                 </div>
               </div>
@@ -708,8 +1099,11 @@ export default function LeaderPage() {
             {duplicateCount > 0 && (
               <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 shadow-sm">
                 <TriangleAlert size={18} />
+
                 <span className="font-semibold">
-                  중복된 구역번호 {duplicateCount}개 발견
+                  중복된 구역번호{" "}
+                  {duplicateCount}
+                  개 발견
                 </span>
               </div>
             )}
@@ -724,16 +1118,26 @@ export default function LeaderPage() {
                 placeholder="구역 이름 또는 번호 검색"
                 className="h-9 rounded-xl bg-white pl-9 text-sm shadow-sm"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) =>
+                  setSearch(
+                    e.target.value,
+                  )
+                }
               />
             </div>
 
             <div className="mb-3 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => setSortType("todo")}
+                onClick={() =>
+                  setSortType(
+                    "todo",
+                  )
+                }
                 className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  !showRecentOnly && sortType === "todo"
+                  !showRecentOnly &&
+                  sortType ===
+                    "todo"
                     ? "bg-slate-900 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -743,9 +1147,15 @@ export default function LeaderPage() {
 
               <button
                 type="button"
-                onClick={() => setSortType("oldest")}
+                onClick={() =>
+                  setSortType(
+                    "oldest",
+                  )
+                }
                 className={`flex items-center justify-center gap-1 rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  !showRecentOnly && sortType === "oldest"
+                  !showRecentOnly &&
+                  sortType ===
+                    "oldest"
                     ? "bg-orange-600 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -756,9 +1166,15 @@ export default function LeaderPage() {
 
               <button
                 type="button"
-                onClick={() => setSortType("number")}
+                onClick={() =>
+                  setSortType(
+                    "number",
+                  )
+                }
                 className={`rounded-xl px-3 py-2 text-sm font-bold shadow-sm transition ${
-                  !showRecentOnly && sortType === "number"
+                  !showRecentOnly &&
+                  sortType ===
+                    "number"
                     ? "bg-slate-900 text-white"
                     : "bg-white text-slate-600"
                 }`}
@@ -767,37 +1183,72 @@ export default function LeaderPage() {
               </button>
             </div>
 
-            <Tabs value={selectedRegionGroup} className="mb-2">
+            <Tabs
+              value={
+                selectedRegionGroup
+              }
+              className="mb-2"
+            >
               <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-slate-200/70 p-1">
-                {["후포지역", "영해지역", "전체"].map((regionGroup) => (
-                  <TabsTrigger
-                    key={regionGroup}
-                    value={regionGroup}
-                    onClick={() => {
-                      setSelectedRegionGroup(regionGroup as RegionGroup);
-                      setSelectedSubRegion("전체");
-                    }}
-                    className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
-                  >
-                    {regionGroup}
-                  </TabsTrigger>
-                ))}
+                {[
+                  "후포지역",
+                  "영해지역",
+                  "전체",
+                ].map(
+                  (
+                    regionGroup,
+                  ) => (
+                    <TabsTrigger
+                      key={
+                        regionGroup
+                      }
+                      value={
+                        regionGroup
+                      }
+                      onClick={() => {
+                        setSelectedRegionGroup(
+                          regionGroup as RegionGroup,
+                        );
+                        setSelectedSubRegion(
+                          "전체",
+                        );
+                      }}
+                      className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                    >
+                      {
+                        regionGroup
+                      }
+                    </TabsTrigger>
+                  ),
+                )}
               </TabsList>
             </Tabs>
 
-            {selectedRegionGroup !== "전체" && (
-              <Tabs value={selectedSubRegion} className="mb-3">
+            {selectedRegionGroup !==
+              "전체" && (
+              <Tabs
+                value={
+                  selectedSubRegion
+                }
+                className="mb-3"
+              >
                 <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
-                  {subRegions.map((region) => (
-                    <TabsTrigger
-                      key={region}
-                      value={region}
-                      onClick={() => setSelectedSubRegion(region)}
-                      className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
-                    >
-                      {region}
-                    </TabsTrigger>
-                  ))}
+                  {subRegions.map(
+                    (region) => (
+                      <TabsTrigger
+                        key={region}
+                        value={region}
+                        onClick={() =>
+                          setSelectedSubRegion(
+                            region,
+                          )
+                        }
+                        className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
+                      >
+                        {region}
+                      </TabsTrigger>
+                    ),
+                  )}
                 </TabsList>
               </Tabs>
             )}
@@ -806,11 +1257,16 @@ export default function LeaderPage() {
               <div>
                 총{" "}
                 <span className="font-semibold text-slate-800">
-                  {filteredZones.length}
+                  {
+                    filteredZones.length
+                  }
                 </span>
                 개 구역
+
                 <span className="ml-2 text-slate-400">
-                  방문 제한 {visitLockMonths}개월
+                  방문 제한{" "}
+                  {visitLockMonths}
+                  개월
                 </span>
               </div>
 
@@ -818,18 +1274,30 @@ export default function LeaderPage() {
                 type="button"
                 title="최근 7일 이내 방문한 구역을 최근 방문순으로 보기"
                 onClick={() => {
-                  setShowRecentOnly((value) => {
-                    const nextValue = !value;
+                  setShowRecentOnly(
+                    (value) => {
+                      const nextValue =
+                        !value;
 
-                    if (nextValue) {
-                      previousSortTypeRef.current = sortType;
-                    } else if (previousSortTypeRef.current) {
-                      setSortType(previousSortTypeRef.current);
-                      previousSortTypeRef.current = null;
-                    }
+                      if (
+                        nextValue
+                      ) {
+                        previousSortTypeRef.current =
+                          sortType;
+                      } else if (
+                        previousSortTypeRef.current
+                      ) {
+                        setSortType(
+                          previousSortTypeRef.current,
+                        );
 
-                    return nextValue;
-                  });
+                        previousSortTypeRef.current =
+                          null;
+                      }
+
+                      return nextValue;
+                    },
+                  );
                 }}
                 className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm ring-1 transition sm:text-xs ${
                   showRecentOnly
@@ -837,163 +1305,207 @@ export default function LeaderPage() {
                     : "bg-white text-blue-700 ring-blue-100"
                 }`}
               >
-                최근 방문 {recentVisitedCount}개
+                최근 방문{" "}
+                {recentVisitedCount}
+                개
               </button>
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {filteredZones.map((zone) => {
-            const isVisited = hasVisitRecord(zone);
-            const isActive = activeZoneIds.includes(zone.firestoreId);
-            const isDuplicate = duplicateZoneIds.has(zone.firestoreId);
+          {filteredZones.map(
+            (zone) => {
+              const isVisited =
+                hasVisitRecord(
+                  zone,
+                );
 
-            const passedMonths = getPassedMonths(zone);
+              const isActive =
+                activeZoneIds.includes(
+                  zone.firestoreId,
+                );
 
-            const isVisitExpired =
-              isVisited &&
-              passedMonths !== null &&
-              passedMonths >= visitLockMonths;
+              const isDuplicate =
+                duplicateZoneIds.has(
+                  zone.firestoreId,
+                );
 
-            return (
-              <Link
-                href={`/zone/${zone.firestoreId}`}
-                key={zone.firestoreId}
-                onClick={saveStateBeforeNavigation}
-              >
-                <Card
-                  className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-                    isDuplicate
-                      ? "border-red-300 bg-red-50 ring-1 ring-red-100"
-                      : isActive
-                        ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
-                        : isVisited && !isVisitExpired
-                          ? "border-slate-200 bg-slate-50 opacity-85"
-                          : "border-slate-200 bg-white"
-                  }`}
+              const passedMonths =
+                getPassedMonths(
+                  zone,
+                );
+
+              const isVisitExpired =
+                isVisited &&
+                passedMonths !==
+                  null &&
+                passedMonths >=
+                  visitLockMonths;
+
+              return (
+                <Link
+                  href={`/zone/${zone.firestoreId}`}
+                  key={
+                    zone.firestoreId
+                  }
+                  onClick={
+                    saveStateBeforeNavigation
+                  }
                 >
-                  <CardContent className="p-3 sm:p-3.5">
-                    <div className="mb-2">
-                      <div className="flex min-w-0 items-start gap-2">
-                        <div
-                          className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
-                            isDuplicate
-                              ? "bg-red-600"
-                              : isActive
-                                ? "bg-emerald-600"
-                                : isVisited && !isVisitExpired
-                                  ? "bg-slate-500"
-                                  : "bg-slate-900"
-                          }`}
-                        >
-                          {zone.id}.
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <h3
-                            className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                  <Card
+                    className={`cursor-pointer rounded-xl border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                      isDuplicate
+                        ? "border-red-300 bg-red-50 ring-1 ring-red-100"
+                        : isActive
+                          ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
+                          : isVisited
+                            ? "border-slate-200 bg-slate-50 opacity-85"
+                            : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <CardContent className="p-3 sm:p-3.5">
+                      <div className="mb-2">
+                        <div className="flex min-w-0 items-start gap-2">
+                          <div
+                            className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white sm:text-xs ${
                               isDuplicate
-                                ? "text-red-900"
+                                ? "bg-red-600"
                                 : isActive
-                                  ? "text-emerald-950"
-                                  : isVisited && !isVisitExpired
-                                    ? "text-slate-700"
-                                    : "text-slate-900"
+                                  ? "bg-emerald-600"
+                                  : isVisited
+                                    ? "bg-slate-500"
+                                    : "bg-slate-900"
                             }`}
                           >
-                            {zone.name}
-                          </h3>
-
-                          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
-                            {zone.region}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {isDuplicate && (
-                          <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[10px] font-bold text-white sm:text-[11px]">
-                            <TriangleAlert size={11} />
-                            중복번호
+                            {zone.id}.
                           </div>
-                        )}
 
-                        <div
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
-                            isActive
-                              ? "bg-emerald-600 text-white"
-                              : isVisited && !isVisitExpired
-                                ? "bg-slate-200 text-slate-600"
-                                : "bg-blue-50 text-blue-700"
-                          }`}
-                        >
-                          {isActive ? (
-                            <>
-                              <Eye size={11} />
-                              방문중
-                            </>
-                          ) : isVisited && !isVisitExpired ? (
-                            <>
-                              <CheckCircle2 size={11} />
-                              완료
-                            </>
-                          ) : (
-                            <>
-                              <AlertCircle size={11} />
-                              방문 필요
-                            </>
-                          )}
+                          <div className="min-w-0 flex-1">
+                            <h3
+                              className={`line-clamp-1 text-sm font-bold sm:text-[15px] ${
+                                isDuplicate
+                                  ? "text-red-900"
+                                  : isActive
+                                    ? "text-emerald-950"
+                                    : isVisited
+                                      ? "text-slate-700"
+                                      : "text-slate-900"
+                              }`}
+                            >
+                              {zone.name}
+                            </h3>
+
+                            <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
+                              {zone.region}
+                            </p>
+                          </div>
                         </div>
 
-                        
-                      </div>
-                    </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {isDuplicate && (
+                            <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[10px] font-bold text-white sm:text-[11px]">
+                              <TriangleAlert size={11} />
+                              중복번호
+                            </div>
+                          )}
 
-                    <div
-                      className={`mt-3 rounded-lg px-2.5 py-2 ${
-                        isDuplicate
-                          ? "bg-red-100/60"
-                          : isActive
-                            ? "bg-white/80"
-                            : isVisited && !isVisitExpired
-                              ? "bg-slate-100"
-                              : "bg-slate-50"
-                      }`}
-                    >
-                      <div className="text-[10px] text-slate-400 sm:text-[11px]">
-                        최근 방문
+                          <div
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
+                              isActive
+                                ? "bg-emerald-600 text-white"
+                                : isVisited &&
+                                    !isVisitExpired
+                                  ? "bg-slate-200 text-slate-600"
+                                  : "bg-blue-50 text-blue-700"
+                            }`}
+                          >
+                            {isActive ? (
+                              <>
+                                <Eye size={11} />
+                                방문중
+                              </>
+                            ) : isVisited &&
+                              !isVisitExpired ? (
+                              <>
+                                <CheckCircle2
+                                  size={11}
+                                />
+                                완료
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle
+                                  size={11}
+                                />
+                                방문 필요
+                              </>
+                            )}
+                          </div>
+
+                          {isVisitExpired &&
+                            passedMonths !==
+                              null && (
+                              <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
+                                {passedMonths}
+                                개월 지남
+                              </div>
+                            )}
+                        </div>
                       </div>
 
                       <div
-                        className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
+                        className={`mt-3 rounded-lg px-2.5 py-2 ${
                           isDuplicate
-                            ? "text-red-800"
+                            ? "bg-red-100/60"
                             : isActive
-                              ? "text-emerald-800"
-                              : isVisited && !isVisitExpired
-                                ? "text-slate-700"
-                                : "text-slate-600"
+                              ? "bg-white/80"
+                              : isVisited
+                                ? "bg-slate-100"
+                                : "bg-slate-50"
                         }`}
                       >
-                        {zone.lastVisitedAt?.seconds
-                          ? new Date(
-                              zone.lastVisitedAt.seconds * 1000,
-                            ).toLocaleString("ko-KR", {
-                              year: "numeric",
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : "방문 기록 없음"}
+                        <div className="text-[10px] text-slate-400 sm:text-[11px]">
+                          최근 방문
+                        </div>
+
+                        <div
+                          className={`mt-0.5 line-clamp-1 text-[11px] font-medium sm:text-xs ${
+                            isDuplicate
+                              ? "text-red-800"
+                              : isActive
+                                ? "text-emerald-800"
+                                : isVisited
+                                  ? "text-slate-700"
+                                  : "text-slate-600"
+                          }`}
+                        >
+                          {zone.lastVisitedAt
+                            ?.seconds
+                            ? new Date(
+                                zone
+                                  .lastVisitedAt
+                                  .seconds *
+                                  1000,
+                              ).toLocaleString(
+                                "ko-KR",
+                                {
+                                  year: "numeric",
+                                  month: "2-digit",
+                                  day: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                },
+                              )
+                            : "방문 기록 없음"}
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
+            },
+          )}
         </div>
       </div>
     </main>

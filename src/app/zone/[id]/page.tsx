@@ -20,6 +20,7 @@ import {
   serverTimestamp,
   setDoc,
   deleteDoc,
+  increment,
 } from "firebase/firestore";
 
 import {
@@ -102,6 +103,13 @@ function formatDate(date: Date) {
   });
 }
 
+function getMonthKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  return `${year}-${month}`;
+}
+
 function normalizeAddresses(addresses?: string[]) {
   if (!Array.isArray(addresses)) return [];
 
@@ -109,8 +117,8 @@ function normalizeAddresses(addresses?: string[]) {
     new Set(
       addresses
         .map((address) => String(address).trim())
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   );
 }
 
@@ -126,9 +134,7 @@ function getCountyByRegion(region?: string) {
     "기성면",
   ];
 
-  return uljinRegions.includes(normalized)
-    ? "울진군"
-    : "영덕군";
+  return uljinRegions.includes(normalized) ? "울진군" : "영덕군";
 }
 
 function getFullAddress(zone: Zone, address: string) {
@@ -139,7 +145,7 @@ function getFullAddress(zone: Zone, address: string) {
 
 function getNaverMapUrl(zone: Zone, address: string) {
   return `https://map.naver.com/p/search/${encodeURIComponent(
-    getFullAddress(zone, address)
+    getFullAddress(zone, address),
   )}`;
 }
 
@@ -155,12 +161,15 @@ export default function ZoneDetailPage() {
   const [recentVisit, setRecentVisit] = useState<VisitLog | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [savingVisit, setSavingVisit] = useState(false);
+
   const [visitLockMonths, setVisitLockMonths] = useState(
-    DEFAULT_VISIT_LOCK_MONTHS
+    DEFAULT_VISIT_LOCK_MONTHS,
   );
+
   const [allowedVisitorNames, setAllowedVisitorNames] = useState<string[]>([
     "관리자",
   ]);
+
   const [selectingVisitor, setSelectingVisitor] = useState(false);
   const [selectedVisitorName, setSelectedVisitorName] = useState("");
 
@@ -191,14 +200,18 @@ export default function ZoneDetailPage() {
     }
 
     const latestDate = new Date(recentVisit.createdAt.seconds * 1000);
-    const nextAvailableDate = addMonths(latestDate, visitLockMonths);
+    const nextAvailableDate = addMonths(
+      latestDate,
+      visitLockMonths,
+    );
+
     const now = new Date();
     const locked = now < nextAvailableDate;
 
     const remainingDays = locked
       ? Math.ceil(
           (nextAvailableDate.getTime() - now.getTime()) /
-            (1000 * 60 * 60 * 24)
+            (1000 * 60 * 60 * 24),
         )
       : 0;
 
@@ -209,6 +222,9 @@ export default function ZoneDetailPage() {
     };
   }, [recentVisit, visitLockMonths]);
 
+  /*
+   * 전역 설정 조회
+   */
   useEffect(() => {
     async function fetchSettings() {
       try {
@@ -217,12 +233,15 @@ export default function ZoneDetailPage() {
 
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
-          const months = Number(data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS);
+
+          const months = Number(
+            data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
+          );
 
           setVisitLockMonths(
             Number.isFinite(months) && months >= 0
               ? months
-              : DEFAULT_VISIT_LOCK_MONTHS
+              : DEFAULT_VISIT_LOCK_MONTHS,
           );
 
           const names = Array.isArray(data.allowedVisitorNames)
@@ -232,7 +251,7 @@ export default function ZoneDetailPage() {
             : [];
 
           setAllowedVisitorNames(
-            names.length > 0 ? Array.from(new Set(names)) : ["관리자"]
+            names.length > 0 ? Array.from(new Set(names)) : ["관리자"],
           );
         }
       } catch (error) {
@@ -243,6 +262,9 @@ export default function ZoneDetailPage() {
     fetchSettings();
   }, []);
 
+  /*
+   * 구역 정보 + 최근 방문 기록
+   */
   useEffect(() => {
     async function fetchZone() {
       try {
@@ -265,7 +287,7 @@ export default function ZoneDetailPage() {
           collection(db, "visitLogs"),
           where("zoneId", "==", id),
           orderBy("createdAt", "desc"),
-          limit(1)
+          limit(1),
         );
 
         const querySnapshot = await getDocs(q);
@@ -277,6 +299,8 @@ export default function ZoneDetailPage() {
 
         if (visits.length > 0) {
           setRecentVisit(visits[0]);
+        } else {
+          setRecentVisit(null);
         }
       } catch (error) {
         console.error("방문 기록 조회 에러:", error);
@@ -289,6 +313,9 @@ export default function ZoneDetailPage() {
     }
   }, [id]);
 
+  /*
+   * 현재 구역 방문중 상태
+   */
   useEffect(() => {
     if (!id) return;
 
@@ -308,7 +335,7 @@ export default function ZoneDetailPage() {
           updatedAt: serverTimestamp(),
           expiresAt: Date.now() + ACTIVE_VIEW_EXPIRE_MS,
         },
-        { merge: true }
+        { merge: true },
       );
     }
 
@@ -329,7 +356,9 @@ export default function ZoneDetailPage() {
         if (user) {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
-          const userRole = userSnap.exists() ? userSnap.data().role : null;
+          const userRole = userSnap.exists()
+            ? userSnap.data().role
+            : null;
 
           if (userRole === "admin") {
             return;
@@ -337,7 +366,11 @@ export default function ZoneDetailPage() {
         }
 
         activeViewDocId = getSessionViewId(id);
-        activeViewRef = doc(db, "activeZoneViews", activeViewDocId);
+        activeViewRef = doc(
+          db,
+          "activeZoneViews",
+          activeViewDocId,
+        );
 
         await writeActiveView();
 
@@ -354,15 +387,10 @@ export default function ZoneDetailPage() {
     const handleBeforeUnload = () => {
       if (!activeViewDocId) return;
 
-      const url = `https://firestore.googleapis.com/v1/projects/${
-        process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-      }/databases/(default)/documents/activeZoneViews/${activeViewDocId}`;
-
-      try {
-        navigator.sendBeacon?.(url);
-      } catch {
-        // expiresAt으로 자동 만료 처리됩니다.
-      }
+      /*
+       * expiresAt을 이용한 자동 만료 방식이므로
+       * 페이지 종료 시 별도의 Firestore 삭제 요청을 만들지 않습니다.
+       */
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -374,16 +402,23 @@ export default function ZoneDetailPage() {
         window.clearInterval(intervalId);
       }
 
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener(
+        "beforeunload",
+        handleBeforeUnload,
+      );
 
       cleanupActiveView();
     };
   }, [id]);
 
+  /*
+   * 이미지 전체화면
+   */
   useEffect(() => {
     if (!imageOpen) return;
 
     const originalOverflow = document.body.style.overflow;
+
     document.body.style.overflow = "hidden";
 
     window.history.pushState({ imageOpen: true }, "");
@@ -396,7 +431,11 @@ export default function ZoneDetailPage() {
 
     return () => {
       document.body.style.overflow = originalOverflow;
-      window.removeEventListener("popstate", handlePopState);
+
+      window.removeEventListener(
+        "popstate",
+        handlePopState,
+      );
     };
   }, [imageOpen]);
 
@@ -404,12 +443,15 @@ export default function ZoneDetailPage() {
     setImageOpen(false);
   }
 
+  /*
+   * 최신 방문 기록 다시 조회
+   */
   async function refreshRecentVisit() {
     const q = query(
       collection(db, "visitLogs"),
       where("zoneId", "==", id),
       orderBy("createdAt", "desc"),
-      limit(1)
+      limit(1),
     );
 
     const querySnapshot = await getDocs(q);
@@ -424,6 +466,15 @@ export default function ZoneDetailPage() {
     }
   }
 
+  /*
+   * 방문완료 저장
+   *
+   * 1. visitLogs에 기존처럼 방문기록 저장
+   * 2. visitStats에 집계 데이터 업데이트
+   *
+   * visitStats는 구역당 1개 문서이므로
+   * 메인 화면에서 438개의 visitLogs를 전부 읽을 필요가 없어집니다.
+   */
   async function saveVisitLog(visitorName: string) {
     if (!zone || savingVisit) return;
 
@@ -437,26 +488,31 @@ export default function ZoneDetailPage() {
     try {
       setSavingVisit(true);
 
+      /*
+       * 저장 직전 최신 방문 기록을 다시 확인합니다.
+       * 다른 사람이 먼저 완료했을 가능성에 대비합니다.
+       */
       const latestVisitSnapshot = await getDocs(
         query(
           collection(db, "visitLogs"),
           where("zoneId", "==", id),
           orderBy("createdAt", "desc"),
-          limit(1)
-        )
+          limit(1),
+        ),
       );
 
       if (!latestVisitSnapshot.empty) {
-        const latestVisit = latestVisitSnapshot.docs[0].data() as VisitLog;
+        const latestVisit =
+          latestVisitSnapshot.docs[0].data() as VisitLog;
 
         if (latestVisit.createdAt?.seconds) {
           const latestDate = new Date(
-            latestVisit.createdAt.seconds * 1000
+            latestVisit.createdAt.seconds * 1000,
           );
 
           const nextAvailableDate = addMonths(
             latestDate,
-            visitLockMonths
+            visitLockMonths,
           );
 
           if (new Date() < nextAvailableDate) {
@@ -465,7 +521,9 @@ export default function ZoneDetailPage() {
             alert(
               `이미 완료된 구역입니다.\n\n최근 인도자: ${
                 latestVisit.visitorName ?? "-"
-              }\n다음 완료 가능일: ${formatDate(nextAvailableDate)}`
+              }\n다음 완료 가능일: ${formatDate(
+                nextAvailableDate,
+              )}`,
             );
 
             window.location.reload();
@@ -475,6 +533,9 @@ export default function ZoneDetailPage() {
         }
       }
 
+      /*
+       * 1단계: 기존 방문기록 저장
+       */
       await addDoc(collection(db, "visitLogs"), {
         zoneId: id,
         zoneName: zone.name,
@@ -484,7 +545,48 @@ export default function ZoneDetailPage() {
         createdAt: serverTimestamp(),
       });
 
-      alert(`${trimmedVisitorName}님 이름으로 방문완료 처리되었습니다!`);
+      /*
+       * 2단계: visitStats 집계 데이터 업데이트
+       *
+       * 현재 월을 YYYY-MM 형식으로 저장합니다.
+       *
+       * 예:
+       * monthlyCounts: {
+       *   "2026-08": 3
+       * }
+       *
+       * 같은 구역을 여러 번 방문하면
+       * 해당 월의 숫자가 계속 증가합니다.
+       */
+      const now = new Date();
+      const currentMonthKey = getMonthKey(now);
+
+      const statsRef = doc(db, "visitStats", id);
+
+      await setDoc(
+        statsRef,
+        {
+          zoneId: id,
+          zoneName: zone.name,
+          zoneNumber:
+            typeof zone.id === "number" ? zone.id : null,
+          region: zone.region,
+
+          visitCount: increment(1),
+
+          lastVisitedAt: serverTimestamp(),
+
+          [`monthlyCounts.${currentMonthKey}`]:
+            increment(1),
+
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      alert(
+        `${trimmedVisitorName}님 이름으로 방문완료 처리되었습니다!`,
+      );
 
       setSelectingVisitor(false);
       setSelectedVisitorName("");
@@ -506,12 +608,16 @@ export default function ZoneDetailPage() {
   function handleVisitLog() {
     if (!zone || savingVisit) return;
 
-    if (visitLockInfo.locked && visitLockInfo.nextAvailableDate) {
+    if (
+      visitLockInfo.locked &&
+      visitLockInfo.nextAvailableDate
+    ) {
       alert(
         `최근 방문완료 후 ${visitLockMonths}개월이 지나야 다시 완료할 수 있습니다.\n\n다음 완료 가능일: ${formatDate(
-          visitLockInfo.nextAvailableDate
-        )}`
+          visitLockInfo.nextAvailableDate,
+        )}`,
       );
+
       return;
     }
 
@@ -548,6 +654,7 @@ export default function ZoneDetailPage() {
             className="mb-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-medium shadow"
           >
             <ArrowLeft size={18} />
+
             {fromEvangelist
               ? "번호 입력 화면으로 돌아가기"
               : "메인으로 돌아가기"}
@@ -555,7 +662,9 @@ export default function ZoneDetailPage() {
 
           <section className="rounded-3xl bg-slate-900 text-white shadow">
             <div className="p-4 sm:p-6">
-              <p className="text-sm text-slate-300">{zone.region}</p>
+              <p className="text-sm text-slate-300">
+                {zone.region}
+              </p>
 
               <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
                 {zone.id}번 {zone.name}
@@ -573,7 +682,7 @@ export default function ZoneDetailPage() {
                       alt={zone.name}
                       width={1600}
                       height={1200}
-                      className="h-auto max-h-[72vh] w-full object-contain select-none grayscale [filter:brightness(0.62)_contrast(3.4)]"
+                      className="h-auto max-h-[72vh] w-full select-none object-contain grayscale [filter:brightness(0.62)_contrast(3.4)]"
                       priority
                     />
                   </button>
@@ -607,13 +716,17 @@ export default function ZoneDetailPage() {
                           <div className="truncate text-sm font-bold">
                             {address}
                           </div>
+
                           <div className="mt-0.5 truncate text-[11px] text-slate-500">
                             {getFullAddress(zone, address)}
                           </div>
                         </div>
 
                         <a
-                          href={getNaverMapUrl(zone, address)}
+                          href={getNaverMapUrl(
+                            zone,
+                            address,
+                          )}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
@@ -632,27 +745,34 @@ export default function ZoneDetailPage() {
                 <span>{zone.region}</span>
               </div>
 
-              {visitLockInfo.locked && visitLockInfo.nextAvailableDate && (
-                <div className="mt-5 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
-                  <div className="flex items-center gap-2 font-bold">
-                    <Lock size={16} />
-                    {visitLockMonths}개월 미만 재완료 제한
+              {visitLockInfo.locked &&
+                visitLockInfo.nextAvailableDate && (
+                  <div className="mt-5 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900">
+                    <div className="flex items-center gap-2 font-bold">
+                      <Lock size={16} />
+                      {visitLockMonths}개월 미만 재완료 제한
+                    </div>
+
+                    <p className="mt-1">
+                      다음 완료 가능일:{" "}
+                      <span className="font-bold">
+                        {formatDate(
+                          visitLockInfo.nextAvailableDate,
+                        )}
+                      </span>
+
+                      {visitLockInfo.remainingDays > 0
+                        ? ` (${visitLockInfo.remainingDays}일 남음)`
+                        : ""}
+                    </p>
                   </div>
-                  <p className="mt-1">
-                    다음 완료 가능일:{" "}
-                    <span className="font-bold">
-                      {formatDate(visitLockInfo.nextAvailableDate)}
-                    </span>
-                    {visitLockInfo.remainingDays > 0
-                      ? ` (${visitLockInfo.remainingDays}일 남음)`
-                      : ""}
-                  </p>
-                </div>
-              )}
+                )}
 
               <button
                 onClick={handleVisitLog}
-                disabled={visitLockInfo.locked || savingVisit}
+                disabled={
+                  visitLockInfo.locked || savingVisit
+                }
                 className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold transition disabled:cursor-not-allowed ${
                   visitLockInfo.locked
                     ? "bg-slate-500 text-slate-200"
@@ -667,93 +787,110 @@ export default function ZoneDetailPage() {
                 ) : (
                   <>
                     <CheckCircle2 size={20} />
-                    {savingVisit ? "저장 중..." : "인도자 선택"}
+                    {savingVisit
+                      ? "저장 중..."
+                      : "인도자 선택"}
                   </>
                 )}
               </button>
 
-              {selectingVisitor && !visitLockInfo.locked && (
-                <div className="mt-3 rounded-2xl bg-white/10 p-3">
-                  <div className="mb-2 text-sm font-bold text-white">
-                    방문한 인도자를 선택해주세요
-                  </div>
-
-                  {visibleVisitorNames.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {visibleVisitorNames.map((name) => {
-                        const selected = selectedVisitorName === name;
-
-                        return (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => setSelectedVisitorName(name)}
-                            disabled={savingVisit}
-                            className={`rounded-xl px-3 py-3 text-sm font-bold shadow transition active:scale-95 disabled:opacity-50 ${
-                              selected
-                                ? "bg-emerald-400 text-slate-950 ring-2 ring-white"
-                                : "bg-white text-slate-900 hover:bg-slate-200"
-                            }`}
-                          >
-                            {name}
-                          </button>
-                        );
-                      })}
+              {selectingVisitor &&
+                !visitLockInfo.locked && (
+                  <div className="mt-3 rounded-2xl bg-white/10 p-3">
+                    <div className="mb-2 text-sm font-bold text-white">
+                      방문한 인도자를 선택해주세요
                     </div>
-                  ) : (
-                    <div className="rounded-xl bg-amber-100 px-3 py-3 text-sm font-bold text-amber-900">
-                      설정에서 인도자 이름을 먼저 추가해주세요.
+
+                    {visibleVisitorNames.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {visibleVisitorNames.map((name) => {
+                          const selected =
+                            selectedVisitorName === name;
+
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() =>
+                                setSelectedVisitorName(name)
+                              }
+                              disabled={savingVisit}
+                              className={`rounded-xl px-3 py-3 text-sm font-bold shadow transition active:scale-95 disabled:opacity-50 ${
+                                selected
+                                  ? "bg-emerald-400 text-slate-950 ring-2 ring-white"
+                                  : "bg-white text-slate-900 hover:bg-slate-200"
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl bg-amber-100 px-3 py-3 text-sm font-bold text-amber-900">
+                        설정에서 인도자 이름을 먼저 추가해주세요.
+                      </div>
+                    )}
+
+                    <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm text-white">
+                      선택된 이름:{" "}
+                      <span className="font-bold">
+                        {selectedVisitorName ||
+                          "아직 선택 안 됨"}
+                      </span>
                     </div>
-                  )}
 
-                  <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm text-white">
-                    선택된 이름:{" "}
-                    <span className="font-bold">
-                      {selectedVisitorName || "아직 선택 안 됨"}
-                    </span>
+                    <div className="mt-2 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900">
+                      아래 구역완료를 눌러야 방문기록이 저장됩니다.
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectingVisitor(false);
+                          setSelectedVisitorName("");
+                        }}
+                        disabled={savingVisit}
+                        className="rounded-xl bg-white/10 px-3 py-3 text-sm font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
+                      >
+                        취소
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveVisitLog(selectedVisitorName)
+                        }
+                        disabled={
+                          savingVisit ||
+                          !selectedVisitorName
+                        }
+                        className="rounded-xl bg-emerald-400 px-3 py-3 text-sm font-bold text-slate-950 shadow transition hover:bg-emerald-300 active:scale-95 disabled:opacity-50"
+                      >
+                        {savingVisit
+                          ? "저장 중..."
+                          : "구역완료"}
+                      </button>
+                    </div>
                   </div>
-
-                  <div className="mt-2 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900">
-                    아래 구역완료를 눌러야 방문기록이 저장됩니다.
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectingVisitor(false);
-                        setSelectedVisitorName("");
-                      }}
-                      disabled={savingVisit}
-                      className="rounded-xl bg-white/10 px-3 py-3 text-sm font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
-                    >
-                      취소
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => saveVisitLog(selectedVisitorName)}
-                      disabled={savingVisit || !selectedVisitorName}
-                      className="rounded-xl bg-emerald-400 px-3 py-3 text-sm font-bold text-slate-950 shadow transition hover:bg-emerald-300 active:scale-95 disabled:opacity-50"
-                    >
-                      {savingVisit ? "저장 중..." : "구역완료"}
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
             </div>
           </section>
 
           <section className="mt-5 rounded-3xl bg-white p-5 shadow">
             <div className="flex items-center gap-2">
               <Clock size={18} />
-              <h2 className="text-lg font-bold">최근 방문 기록</h2>
+              <h2 className="text-lg font-bold">
+                최근 방문 기록
+              </h2>
             </div>
 
             {recentVisit ? (
               <div className="mt-4 rounded-2xl bg-slate-100 p-4">
                 <p className="font-semibold">
-                  {recentVisit.zoneNumber}번 {recentVisit.zoneName}
+                  {recentVisit.zoneNumber}번{" "}
+                  {recentVisit.zoneName}
                 </p>
 
                 {recentVisit.visitorName && (
@@ -765,7 +902,10 @@ export default function ZoneDetailPage() {
                 <p className="mt-1 text-sm text-slate-500">
                   {recentVisit.createdAt?.seconds
                     ? formatDateTime(
-                        new Date(recentVisit.createdAt.seconds * 1000)
+                        new Date(
+                          recentVisit.createdAt.seconds *
+                            1000,
+                        ),
                       )
                     : "시간 정보 없음"}
                 </p>
@@ -806,7 +946,7 @@ export default function ZoneDetailPage() {
               alt={zone.name}
               width={1800}
               height={1400}
-              className="rotate-90 object-contain select-none grayscale [filter:brightness(0.62)_contrast(3.4)]"
+              className="rotate-90 select-none object-contain grayscale [filter:brightness(0.62)_contrast(3.4)]"
               style={{
                 width: "100dvh",
                 height: "100dvw",
