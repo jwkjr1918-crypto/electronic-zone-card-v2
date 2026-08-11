@@ -17,21 +17,16 @@ import {
   doc,
   getDoc,
   getDocs,
-  query,
   onSnapshot,
+  Timestamp,
 } from "firebase/firestore";
 
 import Link from "next/link";
 
 import { db } from "@/firebase/firebase";
 
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
-
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
 import {
   Tabs,
   TabsList,
@@ -52,44 +47,6 @@ const YEONGHAE_REGIONS = [
   "축산면",
 ];
 
-const DEFAULT_VISIT_LOCK_MONTHS = 3;
-
-type RegionGroup =
-  | "후포지역"
-  | "영해지역"
-  | "전체";
-
-type SortType =
-  | "todo"
-  | "number"
-  | "oldest";
-
-interface Zone {
-  firestoreId: string;
-  id?: number;
-  name: string;
-  region: string;
-  lastVisitedAt?: {
-    seconds: number;
-    nanoseconds?: number;
-  } | null;
-  visitCount?: number;
-}
-
-interface ActiveZoneView {
-  zoneId?: string;
-  expiresAt?: number;
-}
-
-interface HomePageState {
-  search?: string;
-  selectedRegionGroup?: RegionGroup;
-  selectedSubRegion?: string;
-  sortType?: SortType;
-  showRecentOnly?: boolean;
-  scrollY?: number;
-}
-
 function normalizeRegion(region?: string) {
   const normalized = String(region ?? "")
     .trim()
@@ -107,21 +64,12 @@ function normalizeRegion(region?: string) {
   return normalized;
 }
 
+const DEFAULT_VISIT_LOCK_MONTHS = 3;
+
 function getMonthsAgo(months: number) {
   const date = new Date();
   date.setMonth(date.getMonth() - months);
   return date;
-}
-
-function getVisitedSeconds(zone: Zone) {
-  return zone.lastVisitedAt?.seconds ?? null;
-}
-
-function hasVisitRecord(zone: Zone) {
-  return (
-    Boolean(zone.lastVisitedAt?.seconds) &&
-    (zone.visitCount ?? 0) > 0
-  );
 }
 
 function isVisitedRecently(zone: Zone) {
@@ -130,19 +78,56 @@ function isVisitedRecently(zone: Zone) {
   if (!seconds) return false;
 
   const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(
-    sevenDaysAgo.getDate() - 7,
-  );
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  return (
-    seconds * 1000 >= sevenDaysAgo.getTime()
-  );
+  return seconds * 1000 >= sevenDaysAgo.getTime();
 }
 
-function getZoneNumber(zone: Zone) {
-  return typeof zone.id === "number"
-    ? zone.id
-    : Number.MAX_SAFE_INTEGER;
+const HOME_STATE_KEY =
+  "electronicZoneCardLeaderState";
+
+type RegionGroup =
+  | "후포지역"
+  | "영해지역"
+  | "전체";
+
+type SortType =
+  | "todo"
+  | "number"
+  | "oldest";
+
+interface Zone {
+  firestoreId: string;
+  id?: number;
+  name: string;
+  region: string;
+  lastVisitedAt?: Timestamp | null;
+  visitCount?: number;
+}
+
+interface VisitStats {
+  zoneId?: string;
+  zoneName?: string;
+  zoneNumber?: number | null;
+  region?: string;
+  visitCount?: number;
+  recentSixMonthCount?: number;
+  lastVisitedAt?: Timestamp | null;
+  monthlyVisits?: Record<string, number>;
+}
+
+interface ActiveZoneView {
+  zoneId?: string;
+  expiresAt?: number;
+}
+
+interface HomePageState {
+  search?: string;
+  selectedRegionGroup?: RegionGroup;
+  selectedSubRegion?: string;
+  sortType?: SortType;
+  showRecentOnly?: boolean;
+  scrollY?: number;
 }
 
 function isRegionGroup(
@@ -164,9 +149,6 @@ function isSortType(
     value === "oldest"
   );
 }
-
-const HOME_STATE_KEY =
-  "electronicZoneCardLeaderState";
 
 function getSavedHomeState() {
   if (typeof window === "undefined") {
@@ -195,7 +177,9 @@ function getSavedHomeState() {
 function saveHomeState(
   state: HomePageState,
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") {
+    return;
+  }
 
   sessionStorage.setItem(
     HOME_STATE_KEY,
@@ -203,14 +187,44 @@ function saveHomeState(
   );
 }
 
+function getZoneNumber(zone: Zone) {
+  return typeof zone.id === "number"
+    ? zone.id
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getVisitedSeconds(zone: Zone) {
+  return zone.lastVisitedAt?.seconds ?? null;
+}
+
+function hasVisitRecord(zone: Zone) {
+  return (
+    Boolean(zone.lastVisitedAt?.seconds) &&
+    (zone.visitCount ?? 0) > 0
+  );
+}
+
+function isThreeMonthsPassed(
+  zone: Zone,
+  cutoffDate: Date,
+) {
+  const seconds = getVisitedSeconds(zone);
+
+  if (!seconds) return false;
+
+  return (
+    seconds * 1000 <= cutoffDate.getTime()
+  );
+}
+
 function getPassedMonths(zone: Zone) {
-  const seconds =
-    getVisitedSeconds(zone);
+  const seconds = getVisitedSeconds(zone);
 
   if (!seconds) return null;
 
-  const visitedDate =
-    new Date(seconds * 1000);
+  const visitedDate = new Date(
+    seconds * 1000,
+  );
 
   const now = new Date();
 
@@ -259,7 +273,10 @@ function sortOldestZones(
   const bVisited =
     hasVisitRecord(b);
 
-  if (!aVisited && !bVisited) {
+  if (
+    !aVisited &&
+    !bVisited
+  ) {
     return sortByZoneNumber(a, b);
   }
 
@@ -312,9 +329,7 @@ function sortTodoZones(
   visitLockMonths: number,
 ) {
   const cutoffDate =
-    getMonthsAgo(
-      visitLockMonths,
-    );
+    getMonthsAgo(visitLockMonths);
 
   const unvisitedZones = zones
     .filter(
@@ -324,17 +339,14 @@ function sortTodoZones(
     .sort(sortByZoneNumber);
 
   const expiredZones = zones
-    .filter((zone) => {
-      const seconds =
-        getVisitedSeconds(zone);
-
-      return (
+    .filter(
+      (zone) =>
         hasVisitRecord(zone) &&
-        Boolean(seconds) &&
-        seconds! * 1000 <=
-          cutoffDate.getTime()
-      );
-    })
+        isThreeMonthsPassed(
+          zone,
+          cutoffDate,
+        ),
+    )
     .sort(
       sortByVisitCountThenZoneNumber,
     );
@@ -345,27 +357,6 @@ function sortTodoZones(
   ];
 }
 
-function getMonthKeysForRecentSixMonths() {
-  const keys: string[] = [];
-
-  const now = new Date();
-
-  for (let i = 0; i < 6; i += 1) {
-    const date = new Date(now);
-    date.setMonth(
-      date.getMonth() - i,
-    );
-
-    keys.push(
-      `${date.getFullYear()}-${String(
-        date.getMonth() + 1,
-      ).padStart(2, "0")}`,
-    );
-  }
-
-  return keys;
-}
-
 export default function LeaderPage() {
   const restoredScrollRef =
     useRef(false);
@@ -373,11 +364,15 @@ export default function LeaderPage() {
   const previousSortTypeRef =
     useRef<SortType | null>(null);
 
-  const [initialScrollY, setInitialScrollY] =
-    useState(0);
+  const [
+    initialScrollY,
+    setInitialScrollY,
+  ] = useState(0);
 
-  const [stateHydrated, setStateHydrated] =
-    useState(false);
+  const [
+    stateHydrated,
+    setStateHydrated,
+  ] = useState(false);
 
   const [zones, setZones] =
     useState<Zone[]>([]);
@@ -398,17 +393,20 @@ export default function LeaderPage() {
   const [
     selectedRegionGroup,
     setSelectedRegionGroup,
-  ] = useState<RegionGroup>(
-    "후포지역",
-  );
+  ] =
+    useState<RegionGroup>(
+      "후포지역",
+    );
 
   const [
     selectedSubRegion,
     setSelectedSubRegion,
   ] = useState("전체");
 
-  const [sortType, setSortType] =
-    useState<SortType>("todo");
+  const [
+    sortType,
+    setSortType,
+  ] = useState<SortType>("todo");
 
   const [
     showRecentOnly,
@@ -422,6 +420,11 @@ export default function LeaderPage() {
     DEFAULT_VISIT_LOCK_MONTHS,
   );
 
+  /*
+   * --------------------------------------------------
+   * 저장된 화면 상태 복원
+   * --------------------------------------------------
+   */
   useEffect(() => {
     const timeoutId =
       window.setTimeout(() => {
@@ -447,14 +450,15 @@ export default function LeaderPage() {
           );
 
           setSortType(
-            isSortType(saved.sortType)
+            isSortType(
+              saved.sortType,
+            )
               ? saved.sortType
               : "todo",
           );
 
           setShowRecentOnly(
-            saved.showRecentOnly ===
-              true,
+            saved.showRecentOnly === true,
           );
 
           setInitialScrollY(
@@ -473,9 +477,9 @@ export default function LeaderPage() {
   }, []);
 
   /*
-   * settings/global
-   *
-   * 기존과 동일하게 1회만 읽음.
+   * --------------------------------------------------
+   * 전역 설정 조회
+   * --------------------------------------------------
    */
   useEffect(() => {
     async function fetchSettings() {
@@ -522,26 +526,33 @@ export default function LeaderPage() {
   }, []);
 
   /*
-   * zones 전체 조회
-   *
-   * visitLogs 전체 조회는 제거.
-   *
-   * visitCount / lastVisitedAt은
-   * 방문 완료 시 zones 문서에 기록됩니다.
+   * --------------------------------------------------
+   * 구역 + 방문 통계 조회
+   * --------------------------------------------------
    */
   useEffect(() => {
-    async function fetchZones() {
+    async function fetchZonesAndVisitStats() {
       try {
-        const querySnapshot =
-          await getDocs(
+        const [
+          zoneSnapshot,
+          statsSnapshot,
+        ] = await Promise.all([
+          getDocs(
             collection(
               db,
               "zones",
             ),
-          );
+          ),
+          getDocs(
+            collection(
+              db,
+              "visitStats",
+            ),
+          ),
+        ]);
 
         const zoneData =
-          querySnapshot.docs.map(
+          zoneSnapshot.docs.map(
             (zoneDoc) => ({
               firestoreId:
                 zoneDoc.id,
@@ -549,116 +560,142 @@ export default function LeaderPage() {
             }),
           ) as Zone[];
 
-        setZones(zoneData);
-      } catch (error) {
-        console.error(
-          "Firebase 에러:",
-          error,
+        const statsMap =
+          new Map<
+            string,
+            VisitStats
+          >();
+
+        statsSnapshot.docs.forEach(
+          (statsDoc) => {
+            const stats =
+              statsDoc.data() as VisitStats;
+
+            statsMap.set(
+              statsDoc.id,
+              stats,
+            );
+          },
         );
-      }
-    }
 
-    fetchZones();
-  }, []);
+        const zoneDataWithVisit =
+          zoneData.map(
+            (zone) => {
+              const stats =
+                statsMap.get(
+                  zone.firestoreId,
+                );
 
-  /*
-   * 최근 6개월 방문 횟수
-   *
-   * 같은 구역을 여러 번 방문한 경우에도
-   * 각각 1회씩 그대로 합산됩니다.
-   *
-   * 예:
-   * 2026-06 = 20
-   * 2026-07 = 35
-   * 2026-08 = 10
-   * => 총 65회
-   *
-   * 기존 visitLogs 전체 조회 대신
-   * 월별 집계 문서 6개만 읽습니다.
-   */
-  useEffect(() => {
-    async function fetchRecentSixMonthStats() {
-      try {
-        const monthKeys =
-          getMonthKeysForRecentSixMonths();
-
-        const snapshots =
-          await Promise.all(
-            monthKeys.map(
-              (monthKey) =>
-                getDoc(
-                  doc(
-                    db,
-                    "visitStats",
-                    monthKey,
-                  ),
-                ),
-            ),
-          );
-
-        const total =
-          snapshots.reduce(
-            (sum, snapshot) => {
-              if (!snapshot.exists()) {
-                return sum;
+              if (!stats) {
+                return {
+                  ...zone,
+                  lastVisitedAt:
+                    null,
+                  visitCount: 0,
+                };
               }
 
-              const count = Number(
-                snapshot.data()
-                  .visitCount ?? 0,
-              );
+              return {
+                ...zone,
+                lastVisitedAt:
+                  stats.lastVisitedAt ??
+                  null,
+                visitCount:
+                  Number(
+                    stats.visitCount ??
+                      0,
+                  ),
+              };
+            },
+          );
+
+        const recentSixMonthVisitCount =
+          statsSnapshot.docs.reduce(
+            (
+              total,
+              statsDoc,
+            ) => {
+              const stats =
+                statsDoc.data() as VisitStats;
 
               return (
-                sum +
-                (Number.isFinite(count)
-                  ? count
-                  : 0)
+                total +
+                Number(
+                  stats.recentSixMonthCount ??
+                    0,
+                )
               );
             },
             0,
           );
 
+        setZones(
+          zoneDataWithVisit,
+        );
+
         setRecentSixMonthVisitCount(
-          total,
+          recentSixMonthVisitCount,
+        );
+
+        console.log(
+          "인도자 화면 구역:",
+          zoneData.length,
+        );
+
+        console.log(
+          "인도자 화면 방문통계:",
+          statsSnapshot.size,
+        );
+
+        console.log(
+          "최근 6개월 방문횟수:",
+          recentSixMonthVisitCount,
         );
       } catch (error) {
         console.error(
-          "최근 6개월 방문 통계 조회 에러:",
+          "구역/방문통계 조회 에러:",
           error,
         );
       }
     }
 
-    fetchRecentSixMonthStats();
+    fetchZonesAndVisitStats();
   }, []);
 
   /*
-   * 현재 방문중인 구역
+   * --------------------------------------------------
+   * 현재 방문중인 구역 실시간 조회
+   * --------------------------------------------------
    */
   useEffect(() => {
-    let latestViews: ActiveZoneView[] =
-      [];
+    let latestViews:
+      ActiveZoneView[] = [];
 
     function updateActiveZones(
       views: ActiveZoneView[],
     ) {
-      const now = Date.now();
+      const now =
+        Date.now();
 
-      const ids = Array.from(
-        new Set(
-          views
-            .filter(
-              (view) =>
-                view.zoneId &&
-                view.expiresAt &&
-                view.expiresAt >
-                  now,
-            )
-            .map((view) =>
-              String(view.zoneId),
-            ),
-        ),
-      );
+      const ids =
+        Array.from(
+          new Set(
+            views
+              .filter(
+                (view) =>
+                  view.zoneId &&
+                  view.expiresAt &&
+                  view.expiresAt >
+                    now,
+              )
+              .map(
+                (view) =>
+                  String(
+                    view.zoneId,
+                  ),
+              ),
+          ),
+        );
 
       setActiveZoneIds(ids);
     }
@@ -676,19 +713,25 @@ export default function LeaderPage() {
                 viewDoc.data() as ActiveZoneView,
             );
 
-        updateActiveZones(latestViews);
-      },
-    );
+          updateActiveZones(
+            latestViews,
+          );
+        },
+      );
 
     const interval =
-      window.setInterval(() => {
-        updateActiveZones(
-          latestViews,
-        );
-      }, 15000);
+      window.setInterval(
+        () => {
+          updateActiveZones(
+            latestViews,
+          );
+        },
+        15000,
+      );
 
     return () => {
       unsubscribe();
+
       window.clearInterval(
         interval,
       );
@@ -696,11 +739,14 @@ export default function LeaderPage() {
   }, []);
 
   /*
+   * --------------------------------------------------
    * 화면 상태 저장
+   * --------------------------------------------------
    */
   useEffect(() => {
     if (
-      typeof window === "undefined" ||
+      typeof window ===
+        "undefined" ||
       !stateHydrated
     ) {
       return;
@@ -768,6 +814,11 @@ export default function LeaderPage() {
     stateHydrated,
   ]);
 
+  /*
+   * --------------------------------------------------
+   * 스크롤 위치 복원
+   * --------------------------------------------------
+   */
   useEffect(() => {
     if (
       restoredScrollRef.current
@@ -810,26 +861,36 @@ export default function LeaderPage() {
     initialScrollY,
   ]);
 
+  /*
+   * --------------------------------------------------
+   * 중복 구역번호 검사
+   * --------------------------------------------------
+   */
   const duplicateZoneIds =
     useMemo(() => {
       const countMap =
-        new Map<number, number>();
+        new Map<
+          number,
+          number
+        >();
 
-      zones.forEach((zone) => {
-        if (
-          typeof zone.id !==
-          "number"
-        ) {
-          return;
-        }
+      zones.forEach(
+        (zone) => {
+          if (
+            typeof zone.id !==
+            "number"
+          ) {
+            return;
+          }
 
-        countMap.set(
-          zone.id,
-          (countMap.get(
+          countMap.set(
             zone.id,
-          ) || 0) + 1,
-        );
-      });
+            (countMap.get(
+              zone.id,
+            ) || 0) + 1,
+          );
+        },
+      );
 
       return new Set(
         zones
@@ -851,6 +912,11 @@ export default function LeaderPage() {
   const duplicateCount =
     duplicateZoneIds.size;
 
+  /*
+   * --------------------------------------------------
+   * 최근 7일 방문 구역
+   * --------------------------------------------------
+   */
   const recentVisitedZones =
     useMemo(
       () =>
@@ -866,6 +932,11 @@ export default function LeaderPage() {
   const recentVisitedCount =
     recentVisitedZones.length;
 
+  /*
+   * --------------------------------------------------
+   * 지역 탭
+   * --------------------------------------------------
+   */
   const subRegions =
     useMemo(() => {
       if (
@@ -889,80 +960,93 @@ export default function LeaderPage() {
       }
 
       return ["전체"];
-    }, [selectedRegionGroup]);
+    }, [
+      selectedRegionGroup,
+    ]);
 
+  /*
+   * --------------------------------------------------
+   * 구역 필터 + 정렬
+   * --------------------------------------------------
+   */
   const filteredZones =
     useMemo(() => {
       const baseFilteredZones =
-        zones.filter((zone) => {
-          const matchesSearch =
-            zone.name.includes(
-              search,
-            ) ||
-            String(
-              zone.id ?? "",
-            ).includes(search);
+        zones.filter(
+          (zone) => {
+            const matchesSearch =
+              zone.name.includes(
+                search,
+              ) ||
+              String(
+                zone.id ?? "",
+              ).includes(
+                search,
+              );
 
-          const matchesRecent =
-            !showRecentOnly ||
-            isVisitedRecently(
-              zone,
+            const matchesRecent =
+              !showRecentOnly ||
+              isVisitedRecently(
+                zone,
+              );
+
+            let matchesRegion =
+              true;
+
+            if (
+              selectedRegionGroup ===
+              "후포지역"
+            ) {
+              matchesRegion =
+                selectedSubRegion ===
+                "전체"
+                  ? HUPO_REGIONS.includes(
+                      normalizeRegion(
+                        zone.region,
+                      ),
+                    )
+                  : normalizeRegion(
+                      zone.region,
+                    ) ===
+                    normalizeRegion(
+                      selectedSubRegion,
+                    );
+            }
+
+            if (
+              selectedRegionGroup ===
+              "영해지역"
+            ) {
+              matchesRegion =
+                selectedSubRegion ===
+                "전체"
+                  ? YEONGHAE_REGIONS.includes(
+                      normalizeRegion(
+                        zone.region,
+                      ),
+                    )
+                  : normalizeRegion(
+                      zone.region,
+                    ) ===
+                    normalizeRegion(
+                      selectedSubRegion,
+                    );
+            }
+
+            return (
+              matchesSearch &&
+              matchesRegion &&
+              matchesRecent
             );
-
-          let matchesRegion =
-            true;
-
-          if (
-            selectedRegionGroup ===
-            "후포지역"
-          ) {
-            matchesRegion =
-              selectedSubRegion ===
-              "전체"
-                ? HUPO_REGIONS.includes(
-                    normalizeRegion(
-                      zone.region,
-                    ),
-                  )
-                : normalizeRegion(
-                    zone.region,
-                  ) ===
-                  normalizeRegion(
-                    selectedSubRegion,
-                  );
-          }
-
-          if (
-            selectedRegionGroup ===
-            "영해지역"
-          ) {
-            matchesRegion =
-              selectedSubRegion ===
-              "전체"
-                ? YEONGHAE_REGIONS.includes(
-                    normalizeRegion(
-                      zone.region,
-                    ),
-                  )
-                : normalizeRegion(
-                    zone.region,
-                  ) ===
-                  normalizeRegion(
-                    selectedSubRegion,
-                  );
-          }
-
-          return (
-            matchesSearch &&
-            matchesRegion &&
-            matchesRecent
-          );
-        });
+          },
+        );
 
       if (showRecentOnly) {
         return [
           ...baseFilteredZones,
-        ].sort(sortByRecentVisit);
+        ].sort(
+          sortByRecentVisit,
+        );
       }
 
       if (
@@ -1018,7 +1102,8 @@ export default function LeaderPage() {
       selectedSubRegion,
       sortType,
       showRecentOnly,
-      scrollY: window.scrollY,
+      scrollY:
+        window.scrollY,
     });
   }
 
@@ -1032,7 +1117,10 @@ export default function LeaderPage() {
                 href="/visits"
                 className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-xs shadow-sm transition hover:bg-slate-50 sm:text-sm"
               >
-                <ClipboardList size={15} />
+                <ClipboardList
+                  size={15}
+                />
+
                 <span className="font-medium">
                   방문기록
                 </span>
@@ -1042,7 +1130,10 @@ export default function LeaderPage() {
                 href="/admin"
                 className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white shadow-sm transition hover:bg-slate-800 sm:text-sm"
               >
-                <Shield size={15} />
+                <Shield
+                  size={15}
+                />
+
                 <span className="font-medium">
                   관리자
                 </span>
@@ -1065,8 +1156,10 @@ export default function LeaderPage() {
                   최근6개월
                   <br />
                   {recentSixMonthVisitCount}/
-                  {totalZoneCount} ·{" "}
-                  {recentSixMonthVisitPercent}%
+                  {totalZoneCount}{" "}
+                  ·{" "}
+                  {recentSixMonthVisitPercent}
+                  %
                 </div>
 
                 <div className="hidden sm:block">
@@ -1078,9 +1171,11 @@ export default function LeaderPage() {
                     {
                       recentSixMonthVisitCount
                     }
+
                     <span className="mx-1 text-sm font-bold text-slate-400">
                       /
                     </span>
+
                     <span className="text-sm font-bold text-slate-500">
                       {totalZoneCount}
                     </span>
@@ -1096,9 +1191,12 @@ export default function LeaderPage() {
               </div>
             </div>
 
-            {duplicateCount > 0 && (
+            {duplicateCount >
+              0 && (
               <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 shadow-sm">
-                <TriangleAlert size={18} />
+                <TriangleAlert
+                  size={18}
+                />
 
                 <span className="font-semibold">
                   중복된 구역번호{" "}
@@ -1160,7 +1258,9 @@ export default function LeaderPage() {
                     : "bg-white text-slate-600"
                 }`}
               >
-                <Clock3 size={14} />
+                <Clock3
+                  size={14}
+                />
                 오래된 순
               </button>
 
@@ -1209,6 +1309,7 @@ export default function LeaderPage() {
                         setSelectedRegionGroup(
                           regionGroup as RegionGroup,
                         );
+
                         setSelectedSubRegion(
                           "전체",
                         );
@@ -1234,10 +1335,16 @@ export default function LeaderPage() {
               >
                 <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm">
                   {subRegions.map(
-                    (region) => (
+                    (
+                      region,
+                    ) => (
                       <TabsTrigger
-                        key={region}
-                        value={region}
+                        key={
+                          region
+                        }
+                        value={
+                          region
+                        }
                         onClick={() =>
                           setSelectedSubRegion(
                             region,
@@ -1245,7 +1352,9 @@ export default function LeaderPage() {
                         }
                         className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold"
                       >
-                        {region}
+                        {
+                          region
+                        }
                       </TabsTrigger>
                     ),
                   )}
@@ -1265,7 +1374,9 @@ export default function LeaderPage() {
 
                 <span className="ml-2 text-slate-400">
                   방문 제한{" "}
-                  {visitLockMonths}
+                  {
+                    visitLockMonths
+                  }
                   개월
                 </span>
               </div>
@@ -1306,7 +1417,9 @@ export default function LeaderPage() {
                 }`}
               >
                 최근 방문{" "}
-                {recentVisitedCount}
+                {
+                  recentVisitedCount
+                }
                 개
               </button>
             </div>
@@ -1343,6 +1456,18 @@ export default function LeaderPage() {
                 passedMonths >=
                   visitLockMonths;
 
+              /*
+               * 방문 기록은 있지만
+               * 방문 제한 기간이 지나지 않은 경우만
+               * 실제 "완료" 상태로 취급합니다.
+               *
+               * 방문 제한 기간이 지난 구역은
+               * 방문 기록이 없는 구역과 동일한 UI를 사용합니다.
+               */
+              const isCompleted =
+                isVisited &&
+                !isVisitExpired;
+
               return (
                 <Link
                   href={`/zone/${zone.firestoreId}`}
@@ -1359,7 +1484,7 @@ export default function LeaderPage() {
                         ? "border-red-300 bg-red-50 ring-1 ring-red-100"
                         : isActive
                           ? "border-emerald-300 bg-emerald-50 ring-1 ring-emerald-100"
-                          : isVisited
+                          : isCompleted
                             ? "border-slate-200 bg-slate-50 opacity-85"
                             : "border-slate-200 bg-white"
                     }`}
@@ -1373,7 +1498,7 @@ export default function LeaderPage() {
                                 ? "bg-red-600"
                                 : isActive
                                   ? "bg-emerald-600"
-                                  : isVisited
+                                  : isCompleted
                                     ? "bg-slate-500"
                                     : "bg-slate-900"
                             }`}
@@ -1388,16 +1513,20 @@ export default function LeaderPage() {
                                   ? "text-red-900"
                                   : isActive
                                     ? "text-emerald-950"
-                                    : isVisited
+                                    : isCompleted
                                       ? "text-slate-700"
                                       : "text-slate-900"
                               }`}
                             >
-                              {zone.name}
+                              {
+                                zone.name
+                              }
                             </h3>
 
                             <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">
-                              {zone.region}
+                              {
+                                zone.region
+                              }
                             </p>
                           </div>
                         </div>
@@ -1405,7 +1534,11 @@ export default function LeaderPage() {
                         <div className="mt-2 flex flex-wrap gap-1">
                           {isDuplicate && (
                             <div className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[10px] font-bold text-white sm:text-[11px]">
-                              <TriangleAlert size={11} />
+                              <TriangleAlert
+                                size={
+                                  11
+                                }
+                              />
                               중복번호
                             </div>
                           )}
@@ -1414,29 +1547,35 @@ export default function LeaderPage() {
                             className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold sm:text-[11px] ${
                               isActive
                                 ? "bg-emerald-600 text-white"
-                                : isVisited &&
-                                    !isVisitExpired
+                                : isCompleted
                                   ? "bg-slate-200 text-slate-600"
                                   : "bg-blue-50 text-blue-700"
                             }`}
                           >
                             {isActive ? (
                               <>
-                                <Eye size={11} />
+                                <Eye
+                                  size={
+                                    11
+                                  }
+                                />
                                 방문중
                               </>
-                            ) : isVisited &&
-                              !isVisitExpired ? (
+                            ) : isCompleted ? (
                               <>
                                 <CheckCircle2
-                                  size={11}
+                                  size={
+                                    11
+                                  }
                                 />
                                 완료
                               </>
                             ) : (
                               <>
                                 <AlertCircle
-                                  size={11}
+                                  size={
+                                    11
+                                  }
                                 />
                                 방문 필요
                               </>
@@ -1447,7 +1586,9 @@ export default function LeaderPage() {
                             passedMonths !==
                               null && (
                               <div className="mt-1 text-[10px] font-medium text-orange-500 sm:text-[11px]">
-                                {passedMonths}
+                                {
+                                  passedMonths
+                                }
                                 개월 지남
                               </div>
                             )}
@@ -1460,7 +1601,7 @@ export default function LeaderPage() {
                             ? "bg-red-100/60"
                             : isActive
                               ? "bg-white/80"
-                              : isVisited
+                              : isCompleted
                                 ? "bg-slate-100"
                                 : "bg-slate-50"
                         }`}
@@ -1475,12 +1616,13 @@ export default function LeaderPage() {
                               ? "text-red-800"
                               : isActive
                                 ? "text-emerald-800"
-                                : isVisited
+                                : isCompleted
                                   ? "text-slate-700"
                                   : "text-slate-600"
                           }`}
                         >
-                          {zone.lastVisitedAt
+                          {zone
+                            .lastVisitedAt
                             ?.seconds
                             ? new Date(
                                 zone
@@ -1494,7 +1636,8 @@ export default function LeaderPage() {
                                   month: "2-digit",
                                   day: "2-digit",
                                   hour: "2-digit",
-                                  minute: "2-digit",
+                                  minute:
+                                    "2-digit",
                                 },
                               )
                             : "방문 기록 없음"}
