@@ -682,7 +682,7 @@ export default function ZoneDetailPage() {
                       alt={zone.name}
                       width={1600}
                       height={1200}
-                      className="h-auto max-h-[72vh] w-full select-none object-contain grayscale [filter:brightness(0.62)_contrast(3.4)]"
+                      className="h-auto max-h-[72vh] w-full select-none object-contain grayscale [filter:brightness(0.72)_contrast(2.0)]"
                       priority
                     />
                   </button>
