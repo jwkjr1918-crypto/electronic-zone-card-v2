@@ -18,7 +18,9 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
+  query,
   Timestamp,
+  where,
 } from "firebase/firestore";
 
 import Link from "next/link";
@@ -128,6 +130,11 @@ interface HomePageState {
   sortType?: SortType;
   showRecentOnly?: boolean;
   scrollY?: number;
+}
+
+interface LoadedRegionData {
+  zones: Zone[];
+  recentSixMonthVisitCount: number;
 }
 
 function isRegionGroup(
@@ -377,6 +384,11 @@ export default function LeaderPage() {
   const [zones, setZones] =
     useState<Zone[]>([]);
 
+  const loadedRegionDataRef =
+    useRef<Partial<Record<RegionGroup, LoadedRegionData>>>(
+      {},
+    );
+
   const [
     recentSixMonthVisitCount,
     setRecentSixMonthVisitCount,
@@ -527,29 +539,70 @@ export default function LeaderPage() {
 
   /*
    * --------------------------------------------------
-   * 구역 + 방문 통계 조회
+   * 선택된 지역의 구역 + 방문 통계 조회
+   *
+   * 기본값은 후포지역이므로 처음에는 후포지역만 읽습니다.
+   * 영해지역/전체를 누르면 해당 데이터가 그때 처음 조회됩니다.
+   * 한 번 읽은 지역은 메모리에 캐시하여 다시 탭을 눌러도
+   * 같은 데이터를 다시 읽지 않습니다.
    * --------------------------------------------------
    */
   useEffect(() => {
-    async function fetchZonesAndVisitStats() {
+    let cancelled = false;
+
+    async function fetchSelectedRegionData() {
       try {
+        const cached =
+          loadedRegionDataRef.current[
+            selectedRegionGroup
+          ];
+
+        if (cached) {
+          setZones(cached.zones);
+          setRecentSixMonthVisitCount(
+            cached.recentSixMonthVisitCount,
+          );
+          return;
+        }
+
+        const regionFilter =
+          selectedRegionGroup === "후포지역"
+            ? HUPO_REGIONS
+            : selectedRegionGroup === "영해지역"
+              ? YEONGHAE_REGIONS
+              : null;
+
+        const zonesRef =
+          collection(db, "zones");
+
+        const statsRef =
+          collection(db, "visitStats");
+
+        const zoneQuery = regionFilter
+          ? query(
+              zonesRef,
+              where("region", "in", regionFilter),
+            )
+          : zonesRef;
+
+        const statsQuery = regionFilter
+          ? query(
+              statsRef,
+              where("region", "in", regionFilter),
+            )
+          : statsRef;
+
         const [
           zoneSnapshot,
           statsSnapshot,
         ] = await Promise.all([
-          getDocs(
-            collection(
-              db,
-              "zones",
-            ),
-          ),
-          getDocs(
-            collection(
-              db,
-              "visitStats",
-            ),
-          ),
+          getDocs(zoneQuery),
+          getDocs(statsQuery),
         ]);
+
+        if (cancelled) {
+          return;
+        }
 
         const zoneData =
           zoneSnapshot.docs.map(
@@ -629,38 +682,54 @@ export default function LeaderPage() {
             0,
           );
 
+        const loadedData: LoadedRegionData = {
+          zones:
+            zoneDataWithVisit,
+          recentSixMonthVisitCount,
+        };
+
+        loadedRegionDataRef.current[
+          selectedRegionGroup
+        ] = loadedData;
+
         setZones(
-          zoneDataWithVisit,
+          loadedData.zones,
         );
 
         setRecentSixMonthVisitCount(
-          recentSixMonthVisitCount,
+          loadedData.recentSixMonthVisitCount,
         );
 
         console.log(
-          "인도자 화면 구역:",
+          `인도자 화면 ${selectedRegionGroup} 구역:`,
           zoneData.length,
         );
 
         console.log(
-          "인도자 화면 방문통계:",
+          `인도자 화면 ${selectedRegionGroup} 방문통계:`,
           statsSnapshot.size,
         );
 
         console.log(
-          "최근 6개월 방문횟수:",
+          `${selectedRegionGroup} 최근 6개월 방문횟수:`,
           recentSixMonthVisitCount,
         );
       } catch (error) {
-        console.error(
-          "구역/방문통계 조회 에러:",
-          error,
-        );
+        if (!cancelled) {
+          console.error(
+            "구역/방문통계 조회 에러:",
+            error,
+          );
+        }
       }
     }
 
-    fetchZonesAndVisitStats();
-  }, []);
+    fetchSelectedRegionData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegionGroup]);
 
   /*
    * --------------------------------------------------
@@ -1581,6 +1650,7 @@ export default function LeaderPage() {
                               </>
                             )}
                           </div>
+                          
                         </div>
                       </div>
 
