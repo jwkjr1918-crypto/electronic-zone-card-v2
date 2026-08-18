@@ -135,9 +135,13 @@ interface HomePageState {
   scrollY?: number;
 }
 
-type LoadedRegionGroup = Exclude<RegionGroup, "전체"> | "전체";
+type LoadedRegionGroup =
+  Exclude<RegionGroup, "전체"> | "전체";
 
-const REGION_GROUPS: Record<LoadedRegionGroup, string[]> = {
+const REGION_GROUPS: Record<
+  LoadedRegionGroup,
+  string[]
+> = {
   "후포지역": HUPO_REGIONS,
   "영해지역": YEONGHAE_REGIONS,
   "전체": [],
@@ -487,6 +491,10 @@ export default function LeaderPage() {
           );
         }
 
+        /*
+         * 화면 상태 복원이 모두 끝난 뒤
+         * Firestore 지역 조회가 시작되도록 합니다.
+         */
         setStateHydrated(true);
       }, 0);
 
@@ -551,20 +559,23 @@ export default function LeaderPage() {
    * 지역별 구역 + 방문 통계 지연 조회
    * --------------------------------------------------
    *
-   * 첫 화면은 후포지역만 조회합니다.
-   * 영해지역/전체는 해당 탭을 처음 선택할 때 조회합니다.
+   * 중요:
+   * 저장된 화면 상태가 모두 복원된 뒤에만
+   * Firestore 조회를 시작합니다.
    *
-   * 이미 조회한 지역은 메모리 캐시에 보관하여
-   * 다시 탭을 눌러도 Firestore에서 재조회하지 않습니다.
-   *
-   * 전체 구역 수와 최근 6개월 방문횟수는
-   * aggregation query로 계산하므로 visitStats 전체
-   * 문서를 브라우저로 읽어오지 않습니다.
+   * 이렇게 하여 첫 진입 시
+   * 기본값 "후포지역" 조회와
+   * 저장된 지역 상태 복원이 서로 겹치면서
+   * 방문통계 연결이 꼬이는 문제를 방지합니다.
    */
   const summaryLoadedRef =
     useRef(false);
 
   useEffect(() => {
+    if (!stateHydrated) {
+      return;
+    }
+
     let cancelled = false;
 
     async function fetchTotalSummary() {
@@ -718,9 +729,14 @@ export default function LeaderPage() {
             },
           ) as Zone[];
 
-        // Firestore의 조회 결과 순서에 의존하지 않고
-        // 기존 화면과 동일하게 구역번호 기준의 안정적인 기본 순서를 유지합니다.
-        zoneData.sort(sortByZoneNumber);
+        /*
+         * Firestore의 조회 결과 순서에 의존하지 않고
+         * 기존 화면과 동일하게 구역번호 기준의
+         * 안정적인 기본 순서를 유지합니다.
+         */
+        zoneData.sort(
+          sortByZoneNumber,
+        );
 
         zoneCacheRef.current.set(
           regionGroup,
@@ -742,7 +758,9 @@ export default function LeaderPage() {
                   ),
                 ),
               )
-              .sort(sortByZoneNumber),
+              .sort(
+                sortByZoneNumber,
+              ),
           );
 
           zoneCacheRef.current.set(
@@ -755,7 +773,9 @@ export default function LeaderPage() {
                   ),
                 ),
               )
-              .sort(sortByZoneNumber),
+              .sort(
+                sortByZoneNumber,
+              ),
           );
         }
 
@@ -781,12 +801,16 @@ export default function LeaderPage() {
     fetchRegion(
       selectedRegionGroup,
     );
+
     fetchTotalSummary();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedRegionGroup]);
+  }, [
+    selectedRegionGroup,
+    stateHydrated,
+  ]);
 
   /*
    * --------------------------------------------------
@@ -1704,7 +1728,6 @@ export default function LeaderPage() {
                               </>
                             )}
                           </div>
-                          
                         </div>
                       </div>
 
