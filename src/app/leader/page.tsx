@@ -14,16 +14,11 @@ import {
 
 import {
   collection,
-  count,
   doc,
-  getAggregateFromServer,
   getDoc,
   getDocs,
   onSnapshot,
-  query,
-  sum,
   Timestamp,
-  where,
 } from "firebase/firestore";
 
 import Link from "next/link";
@@ -134,18 +129,6 @@ interface HomePageState {
   showRecentOnly?: boolean;
   scrollY?: number;
 }
-
-type LoadedRegionGroup =
-  Exclude<RegionGroup, "전체"> | "전체";
-
-const REGION_GROUPS: Record<
-  LoadedRegionGroup,
-  string[]
-> = {
-  "후포지역": HUPO_REGIONS,
-  "영해지역": YEONGHAE_REGIONS,
-  "전체": [],
-};
 
 function isRegionGroup(
   value: unknown,
@@ -394,18 +377,10 @@ export default function LeaderPage() {
   const [zones, setZones] =
     useState<Zone[]>([]);
 
-  const zoneCacheRef =
-    useRef<Map<LoadedRegionGroup, Zone[]>>(
-      new Map(),
-    );
-
   const [
     recentSixMonthVisitCount,
     setRecentSixMonthVisitCount,
   ] = useState(0);
-
-  const [totalZoneCount, setTotalZoneCount] =
-    useState(0);
 
   const [
     activeZoneIds,
@@ -491,10 +466,6 @@ export default function LeaderPage() {
           );
         }
 
-        /*
-         * 화면 상태 복원이 모두 끝난 뒤
-         * Firestore 지역 조회가 시작되도록 합니다.
-         */
         setStateHydrated(true);
       }, 0);
 
@@ -556,135 +527,38 @@ export default function LeaderPage() {
 
   /*
    * --------------------------------------------------
-   * 지역별 구역 + 방문 통계 지연 조회
+   * 구역 + 방문 통계 조회
    * --------------------------------------------------
-   *
-   * 중요:
-   * 저장된 화면 상태가 모두 복원된 뒤에만
-   * Firestore 조회를 시작합니다.
-   *
-   * 이렇게 하여 첫 진입 시
-   * 기본값 "후포지역" 조회와
-   * 저장된 지역 상태 복원이 서로 겹치면서
-   * 방문통계 연결이 꼬이는 문제를 방지합니다.
    */
-  const summaryLoadedRef =
-    useRef(false);
-
   useEffect(() => {
-    if (!stateHydrated) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchTotalSummary() {
-      if (summaryLoadedRef.current) {
-        return;
-      }
-
-      summaryLoadedRef.current = true;
-
+    async function fetchZonesAndVisitStats() {
       try {
-        const [
-          zoneCountSnapshot,
-          recentSixMonthSnapshot,
-        ] = await Promise.all([
-          getAggregateFromServer(
-            query(collection(db, "zones")),
-            {
-              total: count(),
-            },
-          ),
-          getAggregateFromServer(
-            query(collection(db, "visitStats")),
-            {
-              recentSixMonthTotal:
-                sum("recentSixMonthCount"),
-            },
-          ),
-        ]);
-
-        if (cancelled) return;
-
-        setTotalZoneCount(
-          Number(
-            zoneCountSnapshot.data().total ?? 0,
-          ),
-        );
-
-        setRecentSixMonthVisitCount(
-          Number(
-            recentSixMonthSnapshot.data()
-              .recentSixMonthTotal ?? 0,
-          ),
-        );
-      } catch (error) {
-        summaryLoadedRef.current = false;
-
-        console.error(
-          "전체 방문통계 집계 에러:",
-          error,
-        );
-      }
-    }
-
-    async function fetchRegion(
-      regionGroup: LoadedRegionGroup,
-    ) {
-      const cached =
-        zoneCacheRef.current.get(
-          regionGroup,
-        );
-
-      if (cached) {
-        if (!cancelled) {
-          setZones(cached);
-        }
-        return;
-      }
-
-      try {
-        const regionNames =
-          REGION_GROUPS[regionGroup];
-
-        const zoneQuery =
-          regionGroup === "전체"
-            ? query(
-                collection(db, "zones"),
-              )
-            : query(
-                collection(db, "zones"),
-                where(
-                  "region",
-                  "in",
-                  regionNames,
-                ),
-              );
-
-        const statsQuery =
-          regionGroup === "전체"
-            ? query(
-                collection(db, "visitStats"),
-              )
-            : query(
-                collection(db, "visitStats"),
-                where(
-                  "region",
-                  "in",
-                  regionNames,
-                ),
-              );
-
         const [
           zoneSnapshot,
           statsSnapshot,
         ] = await Promise.all([
-          getDocs(zoneQuery),
-          getDocs(statsQuery),
+          getDocs(
+            collection(
+              db,
+              "zones",
+            ),
+          ),
+          getDocs(
+            collection(
+              db,
+              "visitStats",
+            ),
+          ),
         ]);
 
-        if (cancelled) return;
+        const zoneData =
+          zoneSnapshot.docs.map(
+            (zoneDoc) => ({
+              firestoreId:
+                zoneDoc.id,
+              ...zoneDoc.data(),
+            }),
+          ) as Zone[];
 
         const statsMap =
           new Map<
@@ -694,123 +568,99 @@ export default function LeaderPage() {
 
         statsSnapshot.docs.forEach(
           (statsDoc) => {
+            const stats =
+              statsDoc.data() as VisitStats;
+
             statsMap.set(
               statsDoc.id,
-              statsDoc.data() as VisitStats,
+              stats,
             );
           },
         );
 
-        const zoneData =
-          zoneSnapshot.docs.map(
-            (zoneDoc) => {
-              const zone =
-                zoneDoc.data() as Omit<
-                  Zone,
-                  "firestoreId"
-                >;
-
+        const zoneDataWithVisit =
+          zoneData.map(
+            (zone) => {
               const stats =
                 statsMap.get(
-                  zoneDoc.id,
+                  zone.firestoreId,
                 );
 
+              if (!stats) {
+                return {
+                  ...zone,
+                  lastVisitedAt:
+                    null,
+                  visitCount: 0,
+                };
+              }
+
               return {
-                firestoreId:
-                  zoneDoc.id,
                 ...zone,
                 lastVisitedAt:
-                  stats?.lastVisitedAt ??
+                  stats.lastVisitedAt ??
                   null,
-                visitCount: Number(
-                  stats?.visitCount ?? 0,
-                ),
+                visitCount:
+                  Number(
+                    stats.visitCount ??
+                      0,
+                  ),
               };
             },
-          ) as Zone[];
-
-        /*
-         * Firestore의 조회 결과 순서에 의존하지 않고
-         * 기존 화면과 동일하게 구역번호 기준의
-         * 안정적인 기본 순서를 유지합니다.
-         */
-        zoneData.sort(
-          sortByZoneNumber,
-        );
-
-        zoneCacheRef.current.set(
-          regionGroup,
-          zoneData,
-        );
-
-        /*
-         * 전체를 읽었다면 후포/영해 데이터도
-         * 메모리에 나누어 보관합니다.
-         */
-        if (regionGroup === "전체") {
-          zoneCacheRef.current.set(
-            "후포지역",
-            zoneData
-              .filter((zone) =>
-                HUPO_REGIONS.includes(
-                  normalizeRegion(
-                    zone.region,
-                  ),
-                ),
-              )
-              .sort(
-                sortByZoneNumber,
-              ),
           );
 
-          zoneCacheRef.current.set(
-            "영해지역",
-            zoneData
-              .filter((zone) =>
-                YEONGHAE_REGIONS.includes(
-                  normalizeRegion(
-                    zone.region,
-                  ),
-                ),
-              )
-              .sort(
-                sortByZoneNumber,
-              ),
-          );
-        }
+        const recentSixMonthVisitCount =
+          statsSnapshot.docs.reduce(
+            (
+              total,
+              statsDoc,
+            ) => {
+              const stats =
+                statsDoc.data() as VisitStats;
 
-        setZones(zoneData);
+              return (
+                total +
+                Number(
+                  stats.recentSixMonthCount ??
+                    0,
+                )
+              );
+            },
+            0,
+          );
+
+        setZones(
+          zoneDataWithVisit,
+        );
+
+        setRecentSixMonthVisitCount(
+          recentSixMonthVisitCount,
+        );
 
         console.log(
-          `인도자 화면 ${regionGroup} 구역:`,
+          "인도자 화면 구역:",
           zoneData.length,
         );
 
         console.log(
-          `인도자 화면 ${regionGroup} 방문통계:`,
+          "인도자 화면 방문통계:",
           statsSnapshot.size,
+        );
+
+        console.log(
+          "최근 6개월 방문횟수:",
+          recentSixMonthVisitCount,
         );
       } catch (error) {
         console.error(
-          `${regionGroup} 구역/방문통계 조회 에러:`,
+          "구역/방문통계 조회 에러:",
           error,
         );
       }
     }
 
-    fetchRegion(
-      selectedRegionGroup,
-    );
-
-    fetchTotalSummary();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    selectedRegionGroup,
-    stateHydrated,
-  ]);
+    fetchZonesAndVisitStats();
+  }, []);
 
   /*
    * --------------------------------------------------
@@ -1232,6 +1082,9 @@ export default function LeaderPage() {
       showRecentOnly,
       visitLockMonths,
     ]);
+
+  const totalZoneCount =
+    zones.length;
 
   const recentSixMonthVisitPercent =
     totalZoneCount > 0
@@ -1728,6 +1581,7 @@ export default function LeaderPage() {
                               </>
                             )}
                           </div>
+                          
                         </div>
                       </div>
 
