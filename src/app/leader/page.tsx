@@ -718,6 +718,10 @@ export default function LeaderPage() {
             },
           ) as Zone[];
 
+        // Firestore의 조회 결과 순서에 의존하지 않고
+        // 기존 화면과 동일하게 구역번호 기준의 안정적인 기본 순서를 유지합니다.
+        zoneData.sort(sortByZoneNumber);
+
         zoneCacheRef.current.set(
           regionGroup,
           zoneData,
@@ -730,24 +734,28 @@ export default function LeaderPage() {
         if (regionGroup === "전체") {
           zoneCacheRef.current.set(
             "후포지역",
-            zoneData.filter((zone) =>
-              HUPO_REGIONS.includes(
-                normalizeRegion(
-                  zone.region,
+            zoneData
+              .filter((zone) =>
+                HUPO_REGIONS.includes(
+                  normalizeRegion(
+                    zone.region,
+                  ),
                 ),
-              ),
-            ),
+              )
+              .sort(sortByZoneNumber),
           );
 
           zoneCacheRef.current.set(
             "영해지역",
-            zoneData.filter((zone) =>
-              YEONGHAE_REGIONS.includes(
-                normalizeRegion(
-                  zone.region,
+            zoneData
+              .filter((zone) =>
+                YEONGHAE_REGIONS.includes(
+                  normalizeRegion(
+                    zone.region,
+                  ),
                 ),
-              ),
-            ),
+              )
+              .sort(sortByZoneNumber),
           );
         }
 
