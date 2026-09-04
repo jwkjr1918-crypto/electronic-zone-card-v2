@@ -13,8 +13,6 @@ import { saveAs } from "file-saver";
 import {
   collection,
   getDocs,
-  query,
-  orderBy,
   doc,
   deleteDoc,
   addDoc,
@@ -139,14 +137,44 @@ function formatNextAvailableDate(
   });
 }
 
+/**
+ * 같은 구역의 방문기록을 묶기 위한 안정적인 구역 키입니다.
+ *
+ * 우선순위:
+ * 1. zoneId
+ * 2. zoneNumber
+ * 3. 정규화한 zoneName
+ * 4. 방문기록 id
+ */
 function getVisitZoneKey(log: VisitLog) {
-  if (log.zoneId) return `id:${log.zoneId}`;
-  if (typeof log.zoneNumber === "number") return `number:${log.zoneNumber}`;
-  return `name:${log.zoneName}`;
+  const zoneId = log.zoneId?.trim();
+
+  if (zoneId) {
+    return `id:${zoneId}`;
+  }
+
+  if (typeof log.zoneNumber === "number") {
+    return `number:${log.zoneNumber}`;
+  }
+
+  const normalizedName = String(log.zoneName ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (normalizedName) {
+    return `name:${normalizedName}`;
+  }
+
+  return `id:${log.id}`;
 }
 
 function isSameZoneLog(a: VisitLog, b: VisitLog) {
-  if (a.zoneId && b.zoneId && a.zoneId === b.zoneId) return true;
+  const aZoneId = a.zoneId?.trim();
+  const bZoneId = b.zoneId?.trim();
+
+  if (aZoneId && bZoneId && aZoneId === bZoneId) {
+    return true;
+  }
 
   if (
     typeof a.zoneNumber === "number" &&
@@ -156,7 +184,15 @@ function isSameZoneLog(a: VisitLog, b: VisitLog) {
     return true;
   }
 
-  return Boolean(a.zoneName && b.zoneName && a.zoneName === b.zoneName);
+  const aName = String(a.zoneName ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  const bName = String(b.zoneName ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return Boolean(aName && bName && aName === bName);
 }
 
 function sortVisitLogsDesc(logs: VisitLog[]) {
@@ -275,6 +311,7 @@ export default function VisitsPage() {
 
         if (settingsSnap.exists()) {
           const data = settingsSnap.data();
+
           const months = Number(
             data.visitLockMonths ?? DEFAULT_VISIT_LOCK_MONTHS,
           );
@@ -301,6 +338,7 @@ export default function VisitsPage() {
     async function fetchZoneCount() {
       try {
         const snapshot = await getDocs(collection(db, "zones"));
+
         setTotalZoneCount(snapshot.size);
       } catch (error) {
         console.error("구역 수 조회 에러:", error);
@@ -310,15 +348,23 @@ export default function VisitsPage() {
     fetchZoneCount();
   }, []);
 
+  /**
+   * 방문기록 전체 조회
+   *
+   * 기존에는:
+   * orderBy("createdAt", "desc")
+   *
+   * 를 사용했는데 Firestore의 orderBy 쿼리는 createdAt 필드가 없는
+   * 오래된 문서를 결과에서 제외할 수 있습니다.
+   *
+   * 따라서 전체 문서를 가져온 뒤 브라우저에서 정렬합니다.
+   */
   useEffect(() => {
     async function fetchVisitLogs() {
       try {
-        const q = query(
+        const querySnapshot = await getDocs(
           collection(db, "visitLogs"),
-          orderBy("createdAt", "desc"),
         );
-
-        const querySnapshot = await getDocs(q);
 
         const logs = querySnapshot.docs.map((visitDoc) => ({
           id: visitDoc.id,
@@ -344,11 +390,19 @@ export default function VisitsPage() {
     });
   }, [visitLogs, selectedRegion]);
 
+  /**
+   * 방문기록을 실제 구역별로 묶습니다.
+   *
+   * 기존에는 zoneName을 기준으로 묶어서
+   * 같은 구역의 이름이 조금만 달라도 별도의 구역으로 표시될 수 있었습니다.
+   *
+   * 이제 getVisitZoneKey()를 사용합니다.
+   */
   const groupedLogs = useMemo(() => {
     const map = new Map<string, VisitLog[]>();
 
     filteredLogs.forEach((log) => {
-      const key = log.zoneName || log.zoneId || log.id;
+      const key = getVisitZoneKey(log);
 
       if (!map.has(key)) {
         map.set(key, []);
@@ -357,40 +411,59 @@ export default function VisitsPage() {
       map.get(key)?.push(log);
     });
 
-    const groups = Array.from(map.entries()).map(([zoneName, logs]) => {
-      const sortedLogs = sortVisitLogsDesc(logs);
+    const groups = Array.from(map.entries()).map(
+      ([zoneKey, logs]) => {
+        const sortedLogs = sortVisitLogsDesc(logs);
 
-      return {
-        zoneName,
-        logs: sortedLogs,
-        latestLog: sortedLogs[0],
-      };
-    });
+        return {
+          zoneKey,
+          zoneName: sortedLogs[0]?.zoneName ?? "",
+          logs: sortedLogs,
+          latestLog: sortedLogs[0],
+        };
+      },
+    );
 
     return [...groups].sort((a, b) => {
       if (visitLogSortType === "oldest") {
         const timeDiff =
-          getLogSeconds(a.latestLog) - getLogSeconds(b.latestLog);
+          getLogSeconds(a.latestLog) -
+          getLogSeconds(b.latestLog);
 
-        if (timeDiff !== 0) return timeDiff;
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
 
-        return getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+        return (
+          getLogZoneNumber(a.latestLog) -
+          getLogZoneNumber(b.latestLog)
+        );
       }
 
       if (visitLogSortType === "zoneNumber") {
         const numberDiff =
-          getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+          getLogZoneNumber(a.latestLog) -
+          getLogZoneNumber(b.latestLog);
 
-        if (numberDiff !== 0) return numberDiff;
+        if (numberDiff !== 0) {
+          return numberDiff;
+        }
 
         return a.zoneName.localeCompare(b.zoneName, "ko");
       }
 
-      const timeDiff = getLogSeconds(b.latestLog) - getLogSeconds(a.latestLog);
+      const timeDiff =
+        getLogSeconds(b.latestLog) -
+        getLogSeconds(a.latestLog);
 
-      if (timeDiff !== 0) return timeDiff;
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
 
-      return getLogZoneNumber(a.latestLog) - getLogZoneNumber(b.latestLog);
+      return (
+        getLogZoneNumber(a.latestLog) -
+        getLogZoneNumber(b.latestLog)
+      );
     });
   }, [filteredLogs, visitLogSortType]);
 
@@ -422,22 +495,48 @@ export default function VisitsPage() {
     orderedLatestLogIds.length > 0 &&
     orderedLatestLogIds.every((id) => selectedLogs.includes(id));
 
-  function toggleLog(logId: string, shiftKey = false, nextChecked?: boolean) {
+  function toggleLog(
+    logId: string,
+    shiftKey = false,
+    nextChecked?: boolean,
+  ) {
     const previousLogId = lastSelectedLogIdRef.current;
+
     lastSelectedLogIdRef.current = logId;
 
-    if (shiftKey && previousLogId && previousLogId !== logId) {
-      const previousIndex = orderedLatestLogIds.indexOf(previousLogId);
-      const currentIndex = orderedLatestLogIds.indexOf(logId);
+    if (
+      shiftKey &&
+      previousLogId &&
+      previousLogId !== logId
+    ) {
+      const previousIndex =
+        orderedLatestLogIds.indexOf(previousLogId);
 
-      if (previousIndex !== -1 && currentIndex !== -1) {
-        const start = Math.min(previousIndex, currentIndex);
-        const end = Math.max(previousIndex, currentIndex);
-        const rangeIds = orderedLatestLogIds.slice(start, end + 1);
+      const currentIndex =
+        orderedLatestLogIds.indexOf(logId);
+
+      if (
+        previousIndex !== -1 &&
+        currentIndex !== -1
+      ) {
+        const start = Math.min(
+          previousIndex,
+          currentIndex,
+        );
+
+        const end = Math.max(
+          previousIndex,
+          currentIndex,
+        );
+
+        const rangeIds =
+          orderedLatestLogIds.slice(start, end + 1);
 
         setSelectedLogs((prev) => {
           if (nextChecked === false) {
-            return prev.filter((id) => !rangeIds.includes(id));
+            return prev.filter(
+              (id) => !rangeIds.includes(id),
+            );
           }
 
           const next = new Set(prev);
@@ -454,7 +553,8 @@ export default function VisitsPage() {
     }
 
     setSelectedLogs((prev) => {
-      const shouldCheck = nextChecked ?? !prev.includes(logId);
+      const shouldCheck =
+        nextChecked ?? !prev.includes(logId);
 
       if (!shouldCheck) {
         return prev.filter((id) => id !== logId);
@@ -479,7 +579,9 @@ export default function VisitsPage() {
   function toggleAllFilteredLogs() {
     if (allFilteredSelected) {
       setSelectedLogs((prev) =>
-        prev.filter((id) => !orderedLatestLogIds.includes(id)),
+        prev.filter(
+          (id) => !orderedLatestLogIds.includes(id),
+        ),
       );
     } else {
       setSelectedLogs((prev) => {
@@ -496,7 +598,9 @@ export default function VisitsPage() {
 
   function startEditVisitDate(log: VisitLog) {
     setEditingLogId(log.id);
-    setEditingDateValue(toDateTimeLocalValue(log.createdAt));
+    setEditingDateValue(
+      toDateTimeLocalValue(log.createdAt),
+    );
     setEditingVisitorName(log.visitorName || "");
   }
 
@@ -508,8 +612,6 @@ export default function VisitsPage() {
 
   /**
    * visitLogs가 수정/삭제된 뒤 해당 구역의 visitStats를 다시 계산합니다.
-   * 인도자 화면은 visitLogs가 아니라 visitStats를 기준으로 방문 필요 여부를
-   * 판단하므로, 방문기록 변경 시 두 데이터를 함께 맞춰줍니다.
    */
   async function syncVisitStatsForZone(
     zoneLog: VisitLog,
@@ -518,7 +620,10 @@ export default function VisitsPage() {
     const zoneId = zoneLog.zoneId?.trim();
 
     if (!zoneId) {
-      console.warn("visitStats 동기화 건너뜀: zoneId가 없습니다.", zoneLog);
+      console.warn(
+        "visitStats 동기화 건너뜀: zoneId가 없습니다.",
+        zoneLog,
+      );
       return;
     }
 
@@ -534,36 +639,63 @@ export default function VisitsPage() {
     sortedLogs.forEach((log) => {
       if (!log.createdAt?.seconds) return;
 
-      const date = new Date(log.createdAt.seconds * 1000);
+      const date = new Date(
+        log.createdAt.seconds * 1000,
+      );
+
       const monthKey = `${date.getFullYear()}-${String(
         date.getMonth() + 1,
       ).padStart(2, "0")}`;
 
-      monthlyCounts[monthKey] = (monthlyCounts[monthKey] ?? 0) + 1;
+      monthlyCounts[monthKey] =
+        (monthlyCounts[monthKey] ?? 0) + 1;
     });
 
-    const sixMonthsAgo = addMonths(new Date(), -6);
+    const sixMonthsAgo = addMonths(
+      new Date(),
+      -6,
+    );
 
-    const recentSixMonthCount = sortedLogs.filter((log) => {
-      if (!log.createdAt?.seconds) return false;
+    const recentSixMonthCount = sortedLogs.filter(
+      (log) => {
+        if (!log.createdAt?.seconds) return false;
 
-      return new Date(log.createdAt.seconds * 1000) >= sixMonthsAgo;
-    }).length;
+        return (
+          new Date(
+            log.createdAt.seconds * 1000,
+          ) >= sixMonthsAgo
+        );
+      },
+    ).length;
 
-    await setDoc(doc(db, "visitStats", zoneId), {
-      zoneId,
-      zoneName: latestLog?.zoneName ?? zoneLog.zoneName,
-      zoneNumber:
-        typeof (latestLog?.zoneNumber ?? zoneLog.zoneNumber) === "number"
-          ? (latestLog?.zoneNumber ?? zoneLog.zoneNumber)
-          : null,
-      region: latestLog?.region ?? zoneLog.region,
-      visitCount: zoneLogs.length,
-      lastVisitedAt: latestLog?.createdAt ?? null,
-      recentSixMonthCount,
-      monthlyCounts,
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(
+      doc(db, "visitStats", zoneId),
+      {
+        zoneId,
+        zoneName:
+          latestLog?.zoneName ??
+          zoneLog.zoneName,
+        zoneNumber:
+          typeof (
+            latestLog?.zoneNumber ??
+            zoneLog.zoneNumber
+          ) === "number"
+            ? (
+                latestLog?.zoneNumber ??
+                zoneLog.zoneNumber
+              )
+            : null,
+        region:
+          latestLog?.region ??
+          zoneLog.region,
+        visitCount: zoneLogs.length,
+        lastVisitedAt:
+          latestLog?.createdAt ?? null,
+        recentSixMonthCount,
+        monthlyCounts,
+        updatedAt: serverTimestamp(),
+      },
+    );
   }
 
   function getAffectedZoneLogs(logs: VisitLog[]) {
@@ -580,14 +712,17 @@ export default function VisitsPage() {
     return Array.from(map.values());
   }
 
-  async function handleUpdateVisitDate(log: VisitLog) {
+  async function handleUpdateVisitDate(
+    log: VisitLog,
+  ) {
     if (!editingDateValue) {
       alert("수정할 방문 날짜를 선택해주세요.");
       return;
     }
 
     const nextDate = new Date(editingDateValue);
-    const nextVisitorName = editingVisitorName.trim();
+    const nextVisitorName =
+      editingVisitorName.trim();
 
     if (Number.isNaN(nextDate.getTime())) {
       alert("올바른 날짜가 아닙니다.");
@@ -617,12 +752,16 @@ export default function VisitsPage() {
     try {
       setUpdatingDateId(log.id);
 
-      const nextTimestamp = Timestamp.fromDate(nextDate);
+      const nextTimestamp =
+        Timestamp.fromDate(nextDate);
 
-      await updateDoc(doc(db, "visitLogs", log.id), {
-        createdAt: nextTimestamp,
-        visitorName: nextVisitorName,
-      });
+      await updateDoc(
+        doc(db, "visitLogs", log.id),
+        {
+          createdAt: nextTimestamp,
+          visitorName: nextVisitorName,
+        },
+      );
 
       const nextLogs = sortVisitLogsDesc(
         visitLogs.map((item) =>
@@ -630,7 +769,8 @@ export default function VisitsPage() {
             ? {
                 ...item,
                 createdAt: nextTimestamp,
-                visitorName: nextVisitorName,
+                visitorName:
+                  nextVisitorName,
               }
             : item,
         ),
@@ -638,7 +778,10 @@ export default function VisitsPage() {
 
       setVisitLogs(nextLogs);
 
-      await syncVisitStatsForZone(log, nextLogs);
+      await syncVisitStatsForZone(
+        log,
+        nextLogs,
+      );
 
       setEditingLogId(null);
       setEditingDateValue("");
@@ -646,31 +789,51 @@ export default function VisitsPage() {
 
       alert("방문 정보가 수정되었습니다.");
     } catch (error) {
-      console.error("방문완료 날짜 수정 에러:", error);
+      console.error(
+        "방문완료 날짜 수정 에러:",
+        error,
+      );
       alert("방문완료 날짜 수정 실패");
     } finally {
       setUpdatingDateId(null);
     }
   }
 
-  async function handleDeleteLog(log: VisitLog) {
-    const ok = confirm(`${log.zoneName} 방문 기록 1개를 삭제할까요?`);
+  async function handleDeleteLog(
+    log: VisitLog,
+  ) {
+    const ok = confirm(
+      `${log.zoneName} 방문 기록 1개를 삭제할까요?`,
+    );
 
     if (!ok) return;
 
     try {
       setDeletingId(log.id);
 
-      await deleteDoc(doc(db, "visitLogs", log.id));
+      await deleteDoc(
+        doc(db, "visitLogs", log.id),
+      );
 
-      const nextLogs = visitLogs.filter((item) => item.id !== log.id);
+      const nextLogs = visitLogs.filter(
+        (item) => item.id !== log.id,
+      );
 
       setVisitLogs(nextLogs);
-      setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
 
-      await syncVisitStatsForZone(log, nextLogs);
+      setSelectedLogs((prev) =>
+        prev.filter((id) => id !== log.id),
+      );
+
+      await syncVisitStatsForZone(
+        log,
+        nextLogs,
+      );
     } catch (error) {
-      console.error("방문 기록 삭제 에러:", error);
+      console.error(
+        "방문 기록 삭제 에러:",
+        error,
+      );
       alert("삭제 실패");
     } finally {
       setDeletingId(null);
@@ -683,38 +846,63 @@ export default function VisitsPage() {
       return;
     }
 
-    const selectedLogItems = visitLogs.filter((log) =>
-      selectedLogs.includes(log.id),
-    );
+    const selectedLogItems =
+      visitLogs.filter((log) =>
+        selectedLogs.includes(log.id),
+      );
 
-    const targetLogMap = new Map<string, VisitLog>();
+    const targetLogMap =
+      new Map<string, VisitLog>();
 
     selectedLogItems.forEach((log) => {
-      targetLogMap.set(getVisitZoneKey(log), log);
+      targetLogMap.set(
+        getVisitZoneKey(log),
+        log,
+      );
     });
 
-    const targetLogs = Array.from(targetLogMap.values());
+    const targetLogs =
+      Array.from(targetLogMap.values());
 
     if (targetLogs.length === 0) {
-      alert("방문완료할 구역을 찾지 못했습니다.");
+      alert(
+        "방문완료할 구역을 찾지 못했습니다.",
+      );
       return;
     }
 
-    const lockedLogs = targetLogs.filter((targetLog) => {
-      const latestLog = visitLogs.find((log) => isSameZoneLog(log, targetLog));
+    const lockedLogs = targetLogs.filter(
+      (targetLog) => {
+        const latestLog =
+          visitLogs.find((log) =>
+            isSameZoneLog(
+              log,
+              targetLog,
+            ),
+          );
 
-      return isVisitLocked(latestLog?.createdAt, visitLockMonths);
-    });
+        return isVisitLocked(
+          latestLog?.createdAt,
+          visitLockMonths,
+        );
+      },
+    );
 
     if (lockedLogs.length > 0) {
       const preview = lockedLogs
         .slice(0, 5)
         .map((log) => {
-          const latestLog = visitLogs.find((item) =>
-            isSameZoneLog(item, log),
-          );
+          const latestLog =
+            visitLogs.find((item) =>
+              isSameZoneLog(
+                item,
+                log,
+              ),
+            );
 
-          return `${log.zoneNumber ?? ""} ${log.zoneName} - ${formatNextAvailableDate(
+          return `${log.zoneNumber ?? ""} ${
+            log.zoneName
+          } - ${formatNextAvailableDate(
             latestLog?.createdAt,
             visitLockMonths,
           )} 이후 가능`;
@@ -723,7 +911,9 @@ export default function VisitsPage() {
 
       alert(
         `선택한 구역 중 ${lockedLogs.length}개는 최근 방문완료 후 ${visitLockMonths}개월이 지나지 않았습니다.\n\n${preview}${
-          lockedLogs.length > 5 ? "\n..." : ""
+          lockedLogs.length > 5
+            ? "\n..."
+            : ""
         }`,
       );
 
@@ -741,40 +931,65 @@ export default function VisitsPage() {
 
       await Promise.all(
         targetLogs.map((log) =>
-          addDoc(collection(db, "visitLogs"), {
-            zoneId: log.zoneId || "",
-            zoneName: log.zoneName,
-            zoneNumber: log.zoneNumber,
-            region: log.region,
-            visitorName: bulkVisitorName,
-            createdAt: serverTimestamp(),
-          }),
+          addDoc(
+            collection(db, "visitLogs"),
+            {
+              zoneId: log.zoneId || "",
+              zoneName: log.zoneName,
+              zoneNumber: log.zoneNumber,
+              region: log.region,
+              visitorName:
+                bulkVisitorName,
+              createdAt:
+                serverTimestamp(),
+            },
+          ),
         ),
       );
 
-      const nowPlaceholder = Timestamp.fromDate(new Date());
+      const nowPlaceholder =
+        Timestamp.fromDate(
+          new Date(),
+        );
 
-      const localLogs = targetLogs.map((log) => ({
-        ...log,
-        id: `local-${Date.now()}-${log.id}`,
-        visitorName: bulkVisitorName,
-        createdAt: nowPlaceholder,
-      }));
+      const localLogs =
+        targetLogs.map((log) => ({
+          ...log,
+          id: `local-${Date.now()}-${log.id}`,
+          visitorName:
+            bulkVisitorName,
+          createdAt:
+            nowPlaceholder,
+        }));
 
-      const nextLogs = sortVisitLogsDesc([...localLogs, ...visitLogs]);
+      const nextLogs =
+        sortVisitLogsDesc([
+          ...localLogs,
+          ...visitLogs,
+        ]);
 
       setVisitLogs(nextLogs);
 
       await Promise.all(
-        targetLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
+        targetLogs.map((log) =>
+          syncVisitStatsForZone(
+            log,
+            nextLogs,
+          ),
+        ),
       );
 
       setSelectedLogs([]);
       setOpenZone(null);
 
-      alert("방문완료 처리되었습니다.");
+      alert(
+        "방문완료 처리되었습니다.",
+      );
     } catch (error) {
-      console.error("선택 구역 방문완료 에러:", error);
+      console.error(
+        "선택 구역 방문완료 에러:",
+        error,
+      );
       alert("방문완료 처리 실패");
     } finally {
       setBulkCompleting(false);
@@ -797,18 +1012,33 @@ export default function VisitsPage() {
     try {
       setDeletingSelected(true);
 
-      const affectedZoneLogs = getAffectedZoneLogs(
-        visitLogs.filter((log) => selectedLogs.includes(log.id)),
-      );
+      const affectedZoneLogs =
+        getAffectedZoneLogs(
+          visitLogs.filter((log) =>
+            selectedLogs.includes(
+              log.id,
+            ),
+          ),
+        );
 
-      const nextLogs = visitLogs.filter(
-        (log) => !selectedLogs.includes(log.id),
-      );
+      const nextLogs =
+        visitLogs.filter(
+          (log) =>
+            !selectedLogs.includes(
+              log.id,
+            ),
+        );
 
       const batch = writeBatch(db);
 
       selectedLogs.forEach((logId) => {
-        batch.delete(doc(db, "visitLogs", logId));
+        batch.delete(
+          doc(
+            db,
+            "visitLogs",
+            logId,
+          ),
+        );
       });
 
       await batch.commit();
@@ -816,15 +1046,25 @@ export default function VisitsPage() {
       setVisitLogs(nextLogs);
 
       await Promise.all(
-        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
+        affectedZoneLogs.map((log) =>
+          syncVisitStatsForZone(
+            log,
+            nextLogs,
+          ),
+        ),
       );
 
       setSelectedLogs([]);
       setOpenZone(null);
 
-      alert("선택한 방문 기록이 삭제되었습니다.");
+      alert(
+        "선택한 방문 기록이 삭제되었습니다.",
+      );
     } catch (error) {
-      console.error("선택 방문 기록 삭제 에러:", error);
+      console.error(
+        "선택 방문 기록 삭제 에러:",
+        error,
+      );
       alert("선택 삭제 실패");
     } finally {
       setDeletingSelected(false);
@@ -837,58 +1077,93 @@ export default function VisitsPage() {
       return;
     }
 
-    const nextVisitorName = prompt(
-      `선택한 ${selectedLogs.length}개 방문 기록의 인도자 이름을 바꾸려면 입력해주세요.
+    const nextVisitorName =
+      prompt(
+        `선택한 ${selectedLogs.length}개 방문 기록의 인도자 이름을 바꾸려면 입력해주세요.
 이름은 그대로 두려면 빈칸으로 확인을 누르세요.`,
-      "",
-    );
+        "",
+      );
 
     if (nextVisitorName === null) return;
 
-    const nextDateValue = prompt(
-      `선택한 ${selectedLogs.length}개 방문 기록의 날짜를 바꾸려면 아래 형식으로 입력해주세요.
+    const nextDateValue =
+      prompt(
+        `선택한 ${selectedLogs.length}개 방문 기록의 날짜를 바꾸려면 아래 형식으로 입력해주세요.
 예: 2026-05-14 19:30
 날짜는 그대로 두려면 빈칸으로 확인을 누르세요.`,
-      "",
-    );
+        "",
+      );
 
     if (nextDateValue === null) return;
 
-    const trimmedName = nextVisitorName.trim();
-    const trimmedDateValue = nextDateValue.trim();
+    const trimmedName =
+      nextVisitorName.trim();
 
-    if (!trimmedName && !trimmedDateValue) {
-      alert("수정할 인도자 이름이나 날짜를 입력해주세요.");
+    const trimmedDateValue =
+      nextDateValue.trim();
+
+    if (
+      !trimmedName &&
+      !trimmedDateValue
+    ) {
+      alert(
+        "수정할 인도자 이름이나 날짜를 입력해주세요.",
+      );
       return;
     }
 
-    let nextTimestamp: Timestamp | null = null;
+    let nextTimestamp:
+      | Timestamp
+      | null = null;
+
     let nextDate: Date | null = null;
 
     if (trimmedDateValue) {
-      const normalizedDateValue = trimmedDateValue.includes("T")
-        ? trimmedDateValue
-        : trimmedDateValue.replace(" ", "T");
+      const normalizedDateValue =
+        trimmedDateValue.includes("T")
+          ? trimmedDateValue
+          : trimmedDateValue.replace(
+              " ",
+              "T",
+            );
 
-      nextDate = new Date(normalizedDateValue);
+      nextDate =
+        new Date(
+          normalizedDateValue,
+        );
 
-      if (Number.isNaN(nextDate.getTime())) {
-        alert("날짜 형식이 올바르지 않습니다. 예: 2026-05-14 19:30");
+      if (
+        Number.isNaN(
+          nextDate.getTime(),
+        )
+      ) {
+        alert(
+          "날짜 형식이 올바르지 않습니다. 예: 2026-05-14 19:30",
+        );
         return;
       }
 
-      nextTimestamp = Timestamp.fromDate(nextDate);
+      nextTimestamp =
+        Timestamp.fromDate(
+          nextDate,
+        );
     }
 
-    const updateData: Partial<Pick<VisitLog, "visitorName" | "createdAt">> =
-      {};
+    const updateData: Partial<
+      Pick<
+        VisitLog,
+        "visitorName" | "createdAt"
+      >
+    > = {};
 
     if (trimmedName) {
-      updateData.visitorName = trimmedName;
+      updateData.visitorName =
+        trimmedName;
     }
 
     if (nextTimestamp) {
-      updateData.createdAt = nextTimestamp;
+      updateData.createdAt =
+        nextTimestamp;
     }
 
     const confirmLines = [
@@ -896,63 +1171,102 @@ export default function VisitsPage() {
     ];
 
     if (trimmedName) {
-      confirmLines.push(`인도자 이름: ${trimmedName}`);
+      confirmLines.push(
+        `인도자 이름: ${trimmedName}`,
+      );
     }
 
     if (nextDate) {
       confirmLines.push(
-        `방문 날짜: ${nextDate.toLocaleString("ko-KR", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`,
+        `방문 날짜: ${nextDate.toLocaleString(
+          "ko-KR",
+          {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          },
+        )}`,
       );
     }
 
-    const ok = confirm(confirmLines.join("\n"));
+    const ok = confirm(
+      confirmLines.join("\n"),
+    );
 
     if (!ok) return;
 
     try {
-      setUpdatingSelectedLogs(true);
+      setUpdatingSelectedLogs(
+        true,
+      );
 
       const batch = writeBatch(db);
 
-      selectedLogs.forEach((logId) => {
-        batch.update(doc(db, "visitLogs", logId), updateData);
-      });
+      selectedLogs.forEach(
+        (logId) => {
+          batch.update(
+            doc(
+              db,
+              "visitLogs",
+              logId,
+            ),
+            updateData,
+          );
+        },
+      );
 
       await batch.commit();
 
-      const affectedZoneLogs = getAffectedZoneLogs(
-        visitLogs.filter((log) => selectedLogs.includes(log.id)),
-      );
+      const affectedZoneLogs =
+        getAffectedZoneLogs(
+          visitLogs.filter((log) =>
+            selectedLogs.includes(
+              log.id,
+            ),
+          ),
+        );
 
-      const nextLogs = sortVisitLogsDesc(
-        visitLogs.map((log) =>
-          selectedLogs.includes(log.id)
-            ? {
-                ...log,
-                ...updateData,
-              }
-            : log,
-        ),
-      );
+      const nextLogs =
+        sortVisitLogsDesc(
+          visitLogs.map(
+            (log) =>
+              selectedLogs.includes(
+                log.id,
+              )
+                ? {
+                    ...log,
+                    ...updateData,
+                  }
+                : log,
+          ),
+        );
 
       setVisitLogs(nextLogs);
 
       await Promise.all(
-        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
+        affectedZoneLogs.map((log) =>
+          syncVisitStatsForZone(
+            log,
+            nextLogs,
+          ),
+        ),
       );
 
-      alert("선택한 방문 기록이 수정되었습니다.");
+      alert(
+        "선택한 방문 기록이 수정되었습니다.",
+      );
     } catch (error) {
-      console.error("선택 방문 기록 수정 에러:", error);
+      console.error(
+        "선택 방문 기록 수정 에러:",
+        error,
+      );
       alert("선택 수정 실패");
     } finally {
-      setUpdatingSelectedLogs(false);
+      setUpdatingSelectedLogs(
+        false,
+      );
     }
   }
 
@@ -969,25 +1283,44 @@ export default function VisitsPage() {
       const batch = writeBatch(db);
 
       visitLogs.forEach((log) => {
-        batch.delete(doc(db, "visitLogs", log.id));
+        batch.delete(
+          doc(
+            db,
+            "visitLogs",
+            log.id,
+          ),
+        );
       });
 
       await batch.commit();
 
-      const affectedZoneLogs = getAffectedZoneLogs(visitLogs);
+      const affectedZoneLogs =
+        getAffectedZoneLogs(
+          visitLogs,
+        );
 
       setVisitLogs([]);
 
       await Promise.all(
-        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, [])),
+        affectedZoneLogs.map((log) =>
+          syncVisitStatsForZone(
+            log,
+            [],
+          ),
+        ),
       );
 
       setSelectedLogs([]);
       setOpenZone(null);
 
-      alert("전체 방문 기록이 삭제되었습니다.");
+      alert(
+        "전체 방문 기록이 삭제되었습니다.",
+      );
     } catch (error) {
-      console.error("전체 삭제 에러:", error);
+      console.error(
+        "전체 삭제 에러:",
+        error,
+      );
       alert("전체 삭제 실패");
     } finally {
       setDeletingAll(false);
@@ -999,84 +1332,205 @@ export default function VisitsPage() {
       await signOut(auth);
       router.push("/login");
     } catch (error) {
-      console.error("로그아웃 에러:", error);
+      console.error(
+        "로그아웃 에러:",
+        error,
+      );
       alert("로그아웃 실패");
     }
   }
 
-  function formatDate(createdAt?: Timestamp | null) {
-    if (!createdAt?.seconds) return "시간 없음";
+  function formatDate(
+    createdAt?: Timestamp | null,
+  ) {
+    if (!createdAt?.seconds) {
+      return "시간 없음";
+    }
 
-    return new Date(createdAt.seconds * 1000).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return new Date(
+      createdAt.seconds * 1000,
+    ).toLocaleString(
+      "ko-KR",
+      {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      },
+    );
   }
 
-  function formatWordDate(createdAt?: Timestamp | null) {
+  function formatWordDate(
+    createdAt?: Timestamp | null,
+  ) {
     if (!createdAt?.seconds) return "";
 
-    const date = new Date(createdAt.seconds * 1000);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+    const date = new Date(
+      createdAt.seconds * 1000,
+    );
+
+    const year =
+      date.getFullYear();
+
+    const month = String(
+      date.getMonth() + 1,
+    ).padStart(2, "0");
+
+    const day = String(
+      date.getDate(),
+    ).padStart(2, "0");
 
     return `${year}.${month}.${day}`;
   }
 
   function getServiceYear() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
 
-    return month >= 9 ? year + 1 : year;
+    const year =
+      now.getFullYear();
+
+    const month =
+      now.getMonth() + 1;
+
+    return month >= 9
+      ? year + 1
+      : year;
   }
 
-  function getTextCells(row: Element) {
-    return Array.from(row.getElementsByTagNameNS(WORD_NS, "tc"));
+  function getTextCells(
+    row: Element,
+  ) {
+    return Array.from(
+      row.getElementsByTagNameNS(
+        WORD_NS,
+        "tc",
+      ),
+    );
   }
 
-  function createTextParagraph(xmlDoc: XMLDocument, text: string) {
-    const paragraph = xmlDoc.createElementNS(WORD_NS, "w:p");
-    const paragraphProperties = xmlDoc.createElementNS(WORD_NS, "w:pPr");
-    const justify = xmlDoc.createElementNS(WORD_NS, "w:jc");
+  function createTextParagraph(
+    xmlDoc: XMLDocument,
+    text: string,
+  ) {
+    const paragraph =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:p",
+      );
 
-    justify.setAttributeNS(WORD_NS, "w:val", "center");
-    paragraphProperties.appendChild(justify);
+    const paragraphProperties =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:pPr",
+      );
 
-    const run = xmlDoc.createElementNS(WORD_NS, "w:r");
-    const runProperties = xmlDoc.createElementNS(WORD_NS, "w:rPr");
-    const size = xmlDoc.createElementNS(WORD_NS, "w:sz");
-    const sizeCs = xmlDoc.createElementNS(WORD_NS, "w:szCs");
+    const justify =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:jc",
+      );
 
-    size.setAttributeNS(WORD_NS, "w:val", "18");
-    sizeCs.setAttributeNS(WORD_NS, "w:val", "18");
+    justify.setAttributeNS(
+      WORD_NS,
+      "w:val",
+      "center",
+    );
 
-    runProperties.appendChild(size);
-    runProperties.appendChild(sizeCs);
+    paragraphProperties.appendChild(
+      justify,
+    );
 
-    const textNode = xmlDoc.createElementNS(WORD_NS, "w:t");
+    const run =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:r",
+      );
+
+    const runProperties =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:rPr",
+      );
+
+    const size =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:sz",
+      );
+
+    const sizeCs =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:szCs",
+      );
+
+    size.setAttributeNS(
+      WORD_NS,
+      "w:val",
+      "18",
+    );
+
+    sizeCs.setAttributeNS(
+      WORD_NS,
+      "w:val",
+      "18",
+    );
+
+    runProperties.appendChild(
+      size,
+    );
+
+    runProperties.appendChild(
+      sizeCs,
+    );
+
+    const textNode =
+      xmlDoc.createElementNS(
+        WORD_NS,
+        "w:t",
+      );
+
     textNode.textContent = text;
 
-    run.appendChild(runProperties);
-    run.appendChild(textNode);
+    run.appendChild(
+      runProperties,
+    );
 
-    paragraph.appendChild(paragraphProperties);
-    paragraph.appendChild(run);
+    run.appendChild(
+      textNode,
+    );
+
+    paragraph.appendChild(
+      paragraphProperties,
+    );
+
+    paragraph.appendChild(
+      run,
+    );
 
     return paragraph;
   }
 
-  function clearCell(cell: Element | undefined) {
+  function clearCell(
+    cell: Element | undefined,
+  ) {
     if (!cell) return;
 
-    Array.from(cell.getElementsByTagNameNS(WORD_NS, "p")).forEach(
+    Array.from(
+      cell.getElementsByTagNameNS(
+        WORD_NS,
+        "p",
+      ),
+    ).forEach(
       (paragraph) => {
-        if (paragraph.parentNode === cell) {
-          cell.removeChild(paragraph);
+        if (
+          paragraph.parentNode ===
+          cell
+        ) {
+          cell.removeChild(
+            paragraph,
+          );
         }
       },
     );
@@ -1090,26 +1544,51 @@ export default function VisitsPage() {
     if (!cell) return;
 
     clearCell(cell);
-    cell.appendChild(createTextParagraph(xmlDoc, text));
+
+    cell.appendChild(
+      createTextParagraph(
+        xmlDoc,
+        text,
+      ),
+    );
   }
 
-  function getValidThreeMonthLogs(logs: VisitLog[]) {
+  function getValidThreeMonthLogs(
+    logs: VisitLog[],
+  ) {
     const sortedLogs = [...logs]
-      .filter((log) => Boolean(log.createdAt?.seconds))
+      .filter((log) =>
+        Boolean(
+          log.createdAt?.seconds,
+        ),
+      )
       .sort((a, b) => {
-        const aTime = a.createdAt?.seconds ?? 0;
-        const bTime = b.createdAt?.seconds ?? 0;
+        const aTime =
+          a.createdAt?.seconds ?? 0;
+
+        const bTime =
+          b.createdAt?.seconds ?? 0;
 
         return aTime - bTime;
       });
 
-    const validLogs: VisitLog[] = [];
-    let lastValidDate: Date | null = null;
+    const validLogs: VisitLog[] =
+      [];
+
+    let lastValidDate:
+      | Date
+      | null = null;
 
     sortedLogs.forEach((log) => {
-      if (!log.createdAt?.seconds) return;
+      if (!log.createdAt?.seconds) {
+        return;
+      }
 
-      const currentDate = new Date(log.createdAt.seconds * 1000);
+      const currentDate =
+        new Date(
+          log.createdAt.seconds *
+            1000,
+        );
 
       if (
         !lastValidDate ||
@@ -1120,35 +1599,61 @@ export default function VisitsPage() {
         )
       ) {
         validLogs.push(log);
-        lastValidDate = currentDate;
+        lastValidDate =
+          currentDate;
       }
     });
 
     return validLogs;
   }
 
-  function getRecentFourValidLogsOldestFirst(logs: VisitLog[]) {
-    return getValidThreeMonthLogs(logs).slice(-4);
+  function getRecentFourValidLogsOldestFirst(
+    logs: VisitLog[],
+  ) {
+    return getValidThreeMonthLogs(
+      logs,
+    ).slice(-4);
   }
 
   function getValidLogsByZoneNumber() {
-    const map = new Map<number, VisitLog[]>();
+    const map =
+      new Map<number, VisitLog[]>();
 
     visitLogs.forEach((log) => {
-      if (!log.zoneNumber) return;
-
-      if (!map.has(log.zoneNumber)) {
-        map.set(log.zoneNumber, []);
+      if (
+        typeof log.zoneNumber !==
+        "number"
+      ) {
+        return;
       }
 
-      map.get(log.zoneNumber)?.push(log);
+      if (
+        !map.has(log.zoneNumber)
+      ) {
+        map.set(
+          log.zoneNumber,
+          [],
+        );
+      }
+
+      map
+        .get(log.zoneNumber)
+        ?.push(log);
     });
 
-    const validMap = new Map<number, VisitLog[]>();
+    const validMap =
+      new Map<number, VisitLog[]>();
 
-    map.forEach((logs, zoneNumber) => {
-      validMap.set(zoneNumber, getRecentFourValidLogsOldestFirst(logs));
-    });
+    map.forEach(
+      (logs, zoneNumber) => {
+        validMap.set(
+          zoneNumber,
+          getRecentFourValidLogsOldestFirst(
+            logs,
+          ),
+        );
+      },
+    );
 
     return validMap;
   }
@@ -1157,7 +1662,12 @@ export default function VisitsPage() {
     try {
       setGeneratingWord(true);
 
-      const response = await fetch(encodeURI(WORD_TEMPLATE_PATH));
+      const response =
+        await fetch(
+          encodeURI(
+            WORD_TEMPLATE_PATH,
+          ),
+        );
 
       if (!response.ok) {
         alert(
@@ -1166,141 +1676,295 @@ export default function VisitsPage() {
         return;
       }
 
-      const templateBuffer = await response.arrayBuffer();
-      const zip = new PizZip(templateBuffer);
-      const documentFile = zip.file("word/document.xml");
+      const templateBuffer =
+        await response.arrayBuffer();
+
+      const zip =
+        new PizZip(
+          templateBuffer,
+        );
+
+      const documentFile =
+        zip.file(
+          "word/document.xml",
+        );
 
       if (!documentFile) {
-        alert("Word 문서 구조를 읽을 수 없습니다.");
+        alert(
+          "Word 문서 구조를 읽을 수 없습니다.",
+        );
         return;
       }
 
-      const documentXml = documentFile.asText();
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(documentXml, "application/xml");
+      const documentXml =
+        documentFile.asText();
 
-      const tables = Array.from(xmlDoc.getElementsByTagNameNS(WORD_NS, "tbl"));
-      const serviceYearTable = tables[0];
-      const recordTable = tables[1];
+      const parser =
+        new DOMParser();
 
-      if (!serviceYearTable || !recordTable) {
-        alert("Word 양식의 표 구조를 찾을 수 없습니다.");
-        return;
-      }
+      const xmlDoc =
+        parser.parseFromString(
+          documentXml,
+          "application/xml",
+        );
 
-      const serviceYearCells = getTextCells(serviceYearTable);
-
-      setCellText(xmlDoc, serviceYearCells[1], String(getServiceYear()));
-
-      const originalRows = Array.from(
-        recordTable.getElementsByTagNameNS(WORD_NS, "tr"),
+      const tables = Array.from(
+        xmlDoc.getElementsByTagNameNS(
+          WORD_NS,
+          "tbl",
+        ),
       );
 
-      const headerRows = originalRows.slice(0, 2);
-      const firstDataRowTemplate = originalRows[2];
-      const secondDataRowTemplate = originalRows[3];
+      const serviceYearTable =
+        tables[0];
 
-      if (!firstDataRowTemplate || !secondDataRowTemplate) {
-        alert("Word 양식의 데이터 줄 구조를 찾을 수 없습니다.");
+      const recordTable =
+        tables[1];
+
+      if (
+        !serviceYearTable ||
+        !recordTable
+      ) {
+        alert(
+          "Word 양식의 표 구조를 찾을 수 없습니다.",
+        );
         return;
       }
 
-      originalRows.slice(2).forEach((row) => {
-        recordTable.removeChild(row);
-      });
+      const serviceYearCells =
+        getTextCells(
+          serviceYearTable,
+        );
 
-      const validLogsByZoneNumber = getValidLogsByZoneNumber();
+      setCellText(
+        xmlDoc,
+        serviceYearCells[1],
+        String(
+          getServiceYear(),
+        ),
+      );
+
+      const originalRows =
+        Array.from(
+          recordTable.getElementsByTagNameNS(
+            WORD_NS,
+            "tr",
+          ),
+        );
+
+      const headerRows =
+        originalRows.slice(0, 2);
+
+      const firstDataRowTemplate =
+        originalRows[2];
+
+      const secondDataRowTemplate =
+        originalRows[3];
+
+      if (
+        !firstDataRowTemplate ||
+        !secondDataRowTemplate
+      ) {
+        alert(
+          "Word 양식의 데이터 줄 구조를 찾을 수 없습니다.",
+        );
+        return;
+      }
+
+      originalRows
+        .slice(2)
+        .forEach((row) => {
+          recordTable.removeChild(
+            row,
+          );
+        });
+
+      const validLogsByZoneNumber =
+        getValidLogsByZoneNumber();
 
       for (
         let zoneNumber = 1;
-        zoneNumber <= totalZoneCount;
+        zoneNumber <=
+        totalZoneCount;
         zoneNumber += 1
       ) {
-        const firstRow = firstDataRowTemplate.cloneNode(true) as Element;
-        const secondRow = secondDataRowTemplate.cloneNode(true) as Element;
+        const firstRow =
+          firstDataRowTemplate.cloneNode(
+            true,
+          ) as Element;
 
-        const firstRowCells = getTextCells(firstRow);
-        const secondRowCells = getTextCells(secondRow);
+        const secondRow =
+          secondDataRowTemplate.cloneNode(
+            true,
+          ) as Element;
 
-        const zoneLogs = validLogsByZoneNumber.get(zoneNumber) || [];
+        const firstRowCells =
+          getTextCells(firstRow);
+
+        const secondRowCells =
+          getTextCells(secondRow);
+
+        const zoneLogs =
+          validLogsByZoneNumber.get(
+            zoneNumber,
+          ) || [];
 
         const latestCompletedDate =
           zoneLogs.length > 0
-            ? zoneLogs[zoneLogs.length - 1].createdAt
+            ? zoneLogs[
+                zoneLogs.length - 1
+              ].createdAt
             : null;
 
-        setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
+        setCellText(
+          xmlDoc,
+          firstRowCells[0],
+          String(zoneNumber),
+        );
 
         setCellText(
           xmlDoc,
           firstRowCells[1],
-          formatWordDate(latestCompletedDate),
+          formatWordDate(
+            latestCompletedDate,
+          ),
         );
 
-        for (let index = 0; index < 4; index += 1) {
-          const log = zoneLogs[index];
-          const visitorNameCellIndex = 2 + index;
-          const assignedDateCellIndex = 2 + index * 2;
-          const completedDateCellIndex = assignedDateCellIndex + 1;
+        for (
+          let index = 0;
+          index < 4;
+          index += 1
+        ) {
+          const log =
+            zoneLogs[index];
+
+          const visitorNameCellIndex =
+            2 + index;
+
+          const assignedDateCellIndex =
+            2 + index * 2;
+
+          const completedDateCellIndex =
+            assignedDateCellIndex +
+            1;
 
           setCellText(
             xmlDoc,
-            firstRowCells[visitorNameCellIndex],
+            firstRowCells[
+              visitorNameCellIndex
+            ],
             log?.visitorName || "",
           );
 
           setCellText(
             xmlDoc,
-            secondRowCells[assignedDateCellIndex],
-            formatWordDate(log?.createdAt),
+            secondRowCells[
+              assignedDateCellIndex
+            ],
+            formatWordDate(
+              log?.createdAt,
+            ),
           );
 
           setCellText(
             xmlDoc,
-            secondRowCells[completedDateCellIndex],
-            formatWordDate(log?.createdAt),
+            secondRowCells[
+              completedDateCellIndex
+            ],
+            formatWordDate(
+              log?.createdAt,
+            ),
           );
         }
 
-        for (let index = 6; index < firstRowCells.length; index += 1) {
-          setCellText(xmlDoc, firstRowCells[index], "");
+        for (
+          let index = 6;
+          index <
+          firstRowCells.length;
+          index += 1
+        ) {
+          setCellText(
+            xmlDoc,
+            firstRowCells[index],
+            "",
+          );
         }
 
-        for (let index = 10; index < secondRowCells.length; index += 1) {
-          setCellText(xmlDoc, secondRowCells[index], "");
+        for (
+          let index = 10;
+          index <
+          secondRowCells.length;
+          index += 1
+        ) {
+          setCellText(
+            xmlDoc,
+            secondRowCells[index],
+            "",
+          );
         }
 
-        recordTable.appendChild(firstRow);
-        recordTable.appendChild(secondRow);
+        recordTable.appendChild(
+          firstRow,
+        );
+
+        recordTable.appendChild(
+          secondRow,
+        );
       }
 
-      headerRows.forEach((row) => {
-        if (!row.parentNode) {
-          recordTable.insertBefore(row, recordTable.firstChild);
-        }
-      });
+      headerRows.forEach(
+        (row) => {
+          if (!row.parentNode) {
+            recordTable.insertBefore(
+              row,
+              recordTable.firstChild,
+            );
+          }
+        },
+      );
 
-      const serializer = new XMLSerializer();
-      const updatedXml = serializer.serializeToString(xmlDoc);
+      const serializer =
+        new XMLSerializer();
 
-      zip.file("word/document.xml", updatedXml);
+      const updatedXml =
+        serializer.serializeToString(
+          xmlDoc,
+        );
 
-      const blob = zip.generate({
-        type: "blob",
-        mimeType:
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
+      zip.file(
+        "word/document.xml",
+        updatedXml,
+      );
 
-      const today = new Date();
+      const blob =
+        zip.generate({
+          type: "blob",
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
 
-      const fileDate = `${today.getFullYear()}-${String(
-        today.getMonth() + 1,
-      ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const today =
+        new Date();
 
-      saveAs(blob, `구역배정기록-${getServiceYear()}봉사연도-${fileDate}.docx`);
+      const fileDate =
+        `${today.getFullYear()}-${String(
+          today.getMonth() + 1,
+        ).padStart(2, "0")}-${String(
+          today.getDate(),
+        ).padStart(2, "0")}`;
+
+      saveAs(
+        blob,
+        `구역배정기록-${getServiceYear()}봉사연도-${fileDate}.docx`,
+      );
     } catch (error) {
-      console.error("Word 기록 다운로드 에러:", error);
-      alert("Word 기록 다운로드 실패");
+      console.error(
+        "Word 기록 다운로드 에러:",
+        error,
+      );
+      alert(
+        "Word 기록 다운로드 실패",
+      );
     } finally {
       setGeneratingWord(false);
     }
@@ -1341,7 +2005,9 @@ export default function VisitsPage() {
               )}
 
               <button
-                onClick={handleLogout}
+                onClick={
+                  handleLogout
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow"
               >
                 <LogOut size={16} />
@@ -1351,63 +2017,113 @@ export default function VisitsPage() {
 
             <div className="mb-3 rounded-2xl bg-slate-900 p-4 text-white shadow">
               <div className="flex items-center gap-2 text-slate-300">
-                <ClipboardList size={18} />
-                <p className="text-sm">전자구역 방문 관리</p>
+                <ClipboardList
+                  size={18}
+                />
+
+                <p className="text-sm">
+                  전자구역 방문 관리
+                </p>
               </div>
 
               <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <h1 className="text-2xl font-bold">방문 기록 관리</h1>
+                  <h1 className="text-2xl font-bold">
+                    방문 기록 관리
+                  </h1>
 
                   <p className="mt-1 text-sm text-slate-300">
-                    총 {visitLogs.length}개 기록 / 최근 6개월 방문{" "}
+                    총{" "}
+                    {visitLogs.length}
+                    개 기록 / 최근
+                    6개월 방문{" "}
                     <span className="font-bold text-white">
-                      {recentSixMonthVisitCount}회 (
-                      {recentSixMonthVisitPercent}%)
+                      {
+                        recentSixMonthVisitCount
+                      }
+                      회 (
+                      {
+                        recentSixMonthVisitPercent
+                      }
+                      %)
                     </span>
-                    {" / "}현재 {filteredLogs.length}개 표시 /{" "}
-                    {totalZoneCount}개 구역
+                    {" / "}
+                    현재{" "}
+                    {
+                      filteredLogs.length
+                    }
+                    개 표시 /{" "}
+                    {
+                      totalZoneCount
+                    }
+                    개 구역
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={handleDownloadWord}
-                    disabled={generatingWord || loading}
+                    onClick={
+                      handleDownloadWord
+                    }
+                    disabled={
+                      generatingWord ||
+                      loading
+                    }
                     className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                   >
-                    <FileText size={14} />
-                    {generatingWord ? "생성 중..." : "Word 기록 다운로드"}
+                    <FileText
+                      size={14}
+                    />
+
+                    {generatingWord
+                      ? "생성 중..."
+                      : "Word 기록 다운로드"}
                   </button>
 
-                  {visitLogs.length > 0 && (
+                  {visitLogs.length >
+                    0 && (
                     <button
-                      onClick={handleDeleteAll}
-                      disabled={deletingAll}
+                      onClick={
+                        handleDeleteAll
+                      }
+                      disabled={
+                        deletingAll
+                      }
                       className="rounded-xl bg-red-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
-                      {deletingAll ? "삭제 중..." : "전체 삭제"}
+                      {deletingAll
+                        ? "삭제 중..."
+                        : "전체 삭제"}
                     </button>
                   )}
                 </div>
               </div>
             </div>
 
-            <Tabs defaultValue="전체" className="mb-3">
+            <Tabs
+              defaultValue="전체"
+              className="mb-3"
+            >
               <TabsList className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-2xl bg-slate-200/70 p-2">
-                {regions.map((region) => (
-                  <TabsTrigger
-                    key={region}
-                    value={region}
-                    onClick={() => {
-                      setSelectedRegion(region);
-                      setOpenZone(null);
-                    }}
-                    className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
-                  >
-                    {region}
-                  </TabsTrigger>
-                ))}
+                {regions.map(
+                  (region) => (
+                    <TabsTrigger
+                      key={region}
+                      value={region}
+                      onClick={() => {
+                        setSelectedRegion(
+                          region,
+                        );
+                        setOpenZone(
+                          null,
+                        );
+                      }}
+                      className="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold"
+                    >
+                      {region}
+                    </TabsTrigger>
+                  ),
+                )}
               </TabsList>
             </Tabs>
 
@@ -1415,9 +2131,14 @@ export default function VisitsPage() {
               <div className="inline-flex min-w-max rounded-full bg-white p-1 shadow-sm">
                 <button
                   type="button"
-                  onClick={() => setVisitLogSortType("latest")}
+                  onClick={() =>
+                    setVisitLogSortType(
+                      "latest",
+                    )
+                  }
                   className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                    visitLogSortType === "latest"
+                    visitLogSortType ===
+                    "latest"
                       ? "bg-slate-900 text-white"
                       : "text-slate-500"
                   }`}
@@ -1427,9 +2148,14 @@ export default function VisitsPage() {
 
                 <button
                   type="button"
-                  onClick={() => setVisitLogSortType("oldest")}
+                  onClick={() =>
+                    setVisitLogSortType(
+                      "oldest",
+                    )
+                  }
                   className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                    visitLogSortType === "oldest"
+                    visitLogSortType ===
+                    "oldest"
                       ? "bg-slate-900 text-white"
                       : "text-slate-500"
                   }`}
@@ -1439,9 +2165,14 @@ export default function VisitsPage() {
 
                 <button
                   type="button"
-                  onClick={() => setVisitLogSortType("zoneNumber")}
+                  onClick={() =>
+                    setVisitLogSortType(
+                      "zoneNumber",
+                    )
+                  }
                   className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                    visitLogSortType === "zoneNumber"
+                    visitLogSortType ===
+                    "zoneNumber"
                       ? "bg-slate-900 text-white"
                       : "text-slate-500"
                   }`}
@@ -1453,53 +2184,100 @@ export default function VisitsPage() {
 
             <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={toggleAllFilteredLogs}
-                disabled={filteredLogs.length === 0}
+                onClick={
+                  toggleAllFilteredLogs
+                }
+                disabled={
+                  filteredLogs.length ===
+                  0
+                }
                 className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow disabled:opacity-50"
               >
-                {allFilteredSelected ? "전체 해제" : "전체 선택"}
+                {allFilteredSelected
+                  ? "전체 해제"
+                  : "전체 선택"}
               </button>
 
-              {role === "admin" && (
+              {role ===
+                "admin" && (
                 <button
-                  onClick={handleBulkVisitComplete}
-                  disabled={bulkCompleting || selectedLogs.length === 0}
+                  onClick={
+                    handleBulkVisitComplete
+                  }
+                  disabled={
+                    bulkCompleting ||
+                    selectedLogs.length ===
+                      0
+                  }
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
                 >
-                  <ClipboardList size={16} />
-                  {bulkCompleting ? "처리 중..." : "선택 구역 방문완료"}
+                  <ClipboardList
+                    size={16}
+                  />
+
+                  {bulkCompleting
+                    ? "처리 중..."
+                    : "선택 구역 방문완료"}
                 </button>
               )}
 
-              {role === "admin" && (
+              {role ===
+                "admin" && (
                 <button
-                  onClick={handleUpdateSelectedLogs}
+                  onClick={
+                    handleUpdateSelectedLogs
+                  }
                   disabled={
-                    updatingSelectedLogs || selectedLogs.length === 0
+                    updatingSelectedLogs ||
+                    selectedLogs.length ===
+                      0
                   }
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
                 >
-                  <Pencil size={16} />
-                  {updatingSelectedLogs ? "수정 중..." : "선택 수정"}
+                  <Pencil
+                    size={16}
+                  />
+
+                  {updatingSelectedLogs
+                    ? "수정 중..."
+                    : "선택 수정"}
                 </button>
               )}
 
               <button
-                onClick={handleDeleteSelectedLogs}
-                disabled={deletingSelected || selectedLogs.length === 0}
+                onClick={
+                  handleDeleteSelectedLogs
+                }
+                disabled={
+                  deletingSelected ||
+                  selectedLogs.length ===
+                    0
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
               >
-                <Trash2 size={16} />
-                {deletingSelected ? "삭제 중..." : "선택 삭제"}
+                <Trash2
+                  size={16}
+                />
+
+                {deletingSelected
+                  ? "삭제 중..."
+                  : "선택 삭제"}
               </button>
 
               <div className="rounded-full bg-white px-3 py-1 text-sm text-slate-500 shadow">
-                선택 {selectedLogs.length}개
+                선택{" "}
+                {
+                  selectedLogs.length
+                }
+                개
               </div>
 
               <div className="text-xs text-slate-500">
-                상단 체크는 각 구역의 최근 기록과 연동됩니다. 선택 후 방문완료를
-                누르면 해당 구역에 새 방문기록이 추가됩니다.
+                상단 체크는 각 구역의
+                최근 기록과 연동됩니다.
+                선택 후 방문완료를
+                누르면 해당 구역에 새
+                방문기록이 추가됩니다.
               </div>
             </div>
           </div>
@@ -1509,232 +2287,391 @@ export default function VisitsPage() {
           <div className="rounded-2xl bg-white p-6 shadow">
             불러오는 중...
           </div>
-        ) : groupedLogs.length === 0 ? (
+        ) : groupedLogs.length ===
+          0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-400 shadow">
             방문 기록이 없습니다.
           </div>
         ) : (
           <div className="space-y-2">
-            {groupedLogs.map(({ zoneName, logs, latestLog }) => {
-              const isOpen = openZone === zoneName;
-              const latestSelected = selectedLogs.includes(latestLog.id);
-              const selectedCount = latestSelected ? 1 : 0;
-              const allZoneSelected = latestSelected;
+            {groupedLogs.map(
+              ({
+                zoneKey,
+                zoneName,
+                logs,
+                latestLog,
+              }) => {
+                if (!latestLog) {
+                  return null;
+                }
 
-              return (
-                <div
-                  key={zoneName}
-                  className={`overflow-hidden rounded-2xl bg-white shadow ${
-                    selectedCount > 0 ? "ring-2 ring-red-200" : ""
-                  }`}
-                >
-                  <div className="flex w-full items-center gap-3 p-4">
-                    <input
-                      type="checkbox"
-                      checked={allZoneSelected}
-                      onChange={(event) => {
-                        toggleLatestLog(
-                          latestLog.id,
-                          shiftPressedRef.current,
-                          event.target.checked,
-                        );
-                      }}
-                      className="h-6 w-6 shrink-0 accent-red-500"
-                      aria-label={`${latestLog.zoneName} 최근 방문기록 선택`}
-                    />
+                const isOpen =
+                  openZone ===
+                  zoneKey;
 
-                    <button
-                      onClick={() => setOpenZone(isOpen ? null : zoneName)}
-                      className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
-                            {latestLog.zoneNumber ?? latestLog.zoneId}.
-                          </span>
+                const latestSelected =
+                  selectedLogs.includes(
+                    latestLog.id,
+                  );
 
-                          <span className="truncate text-base font-bold text-slate-900">
-                            {latestLog.zoneName}
-                          </span>
+                const selectedCount =
+                  latestSelected
+                    ? 1
+                    : 0;
 
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">
-                            기록 {logs.length}개
-                          </span>
+                const allZoneSelected =
+                  latestSelected;
 
-                          {selectedCount > 0 && (
-                            <span className="rounded-full bg-red-500 px-2 py-1 text-xs font-semibold text-white">
-                              선택됨 {selectedCount}개
+                return (
+                  <div
+                    key={zoneKey}
+                    className={`overflow-hidden rounded-2xl bg-white shadow ${
+                      selectedCount >
+                      0
+                        ? "ring-2 ring-red-200"
+                        : ""
+                    }`}
+                  >
+                    <div className="flex w-full items-center gap-3 p-4">
+                      <input
+                        type="checkbox"
+                        checked={
+                          allZoneSelected
+                        }
+                        onChange={(
+                          event,
+                        ) => {
+                          toggleLatestLog(
+                            latestLog.id,
+                            shiftPressedRef.current,
+                            event.target
+                              .checked,
+                          );
+                        }}
+                        className="h-6 w-6 shrink-0 accent-red-500"
+                        aria-label={`${latestLog.zoneName} 최근 방문기록 선택`}
+                      />
+
+                      <button
+                        onClick={() =>
+                          setOpenZone(
+                            isOpen
+                              ? null
+                              : zoneKey,
+                          )
+                        }
+                        className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                              {latestLog.zoneNumber ??
+                                latestLog.zoneId}
+                              .
                             </span>
-                          )}
+
+                            <span className="truncate text-base font-bold text-slate-900">
+                              {zoneName}
+                            </span>
+
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">
+                              기록{" "}
+                              {
+                                logs.length
+                              }
+                              개
+                            </span>
+
+                            {selectedCount >
+                              0 && (
+                              <span className="rounded-full bg-red-500 px-2 py-1 text-xs font-semibold text-white">
+                                선택됨{" "}
+                                {
+                                  selectedCount
+                                }
+                                개
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span className="flex items-center gap-1">
+                              <MapPin
+                                size={13}
+                              />
+
+                              {latestLog.region ||
+                                "지역 정보 없음"}
+                            </span>
+
+                            {latestLog.visitorName && (
+                              <span className="flex items-center gap-1 font-medium text-slate-700">
+                                <User
+                                  size={13}
+                                />
+
+                                최근 인도자:{" "}
+                                {
+                                  latestLog.visitorName
+                                }
+                              </span>
+                            )}
+
+                            <span className="flex items-center gap-1">
+                              <Clock3
+                                size={13}
+                              />
+
+                              {formatDate(
+                                latestLog.createdAt,
+                              )}
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                          <span className="flex items-center gap-1">
-                            <MapPin size={13} />
-                            {latestLog.region || "지역 정보 없음"}
-                          </span>
+                        {isOpen ? (
+                          <ChevronUp
+                            size={20}
+                            className="shrink-0"
+                          />
+                        ) : (
+                          <ChevronDown
+                            size={20}
+                            className="shrink-0"
+                          />
+                        )}
+                      </button>
+                    </div>
 
-                          {latestLog.visitorName && (
-                            <span className="flex items-center gap-1 font-medium text-slate-700">
-                              <User size={13} />
-                              최근 인도자: {latestLog.visitorName}
-                            </span>
-                          )}
+                    {isOpen && (
+                      <div className="border-t border-slate-100 bg-slate-50 p-3">
+                        <div className="space-y-2">
+                          {logs.map(
+                            (log) => {
+                              const isLatestLog =
+                                log.id ===
+                                latestLog.id;
 
-                          <span className="flex items-center gap-1">
-                            <Clock3 size={13} />
-                            {formatDate(latestLog.createdAt)}
-                          </span>
-                        </div>
-                      </div>
+                              const checked =
+                                selectedLogs.includes(
+                                  log.id,
+                                );
 
-                      {isOpen ? (
-                        <ChevronUp size={20} className="shrink-0" />
-                      ) : (
-                        <ChevronDown size={20} className="shrink-0" />
-                      )}
-                    </button>
-                  </div>
+                              const isEditing =
+                                editingLogId ===
+                                log.id;
 
-                  {isOpen && (
-                    <div className="border-t border-slate-100 bg-slate-50 p-3">
-                      <div className="space-y-2">
-                        {logs.map((log) => {
-                          const isLatestLog = log.id === latestLog.id;
-                          const checked = selectedLogs.includes(log.id);
-                          const isEditing = editingLogId === log.id;
+                              return (
+                                <div
+                                  key={
+                                    log.id
+                                  }
+                                  className={`rounded-xl px-3 py-2 ${
+                                    checked
+                                      ? "bg-red-100 ring-2 ring-red-300"
+                                      : "bg-white"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="flex min-w-0 items-center gap-3 text-sm">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          checked
+                                        }
+                                        onChange={(
+                                          event,
+                                        ) => {
+                                          toggleLog(
+                                            log.id,
+                                            shiftPressedRef.current,
+                                            event.target
+                                              .checked,
+                                          );
+                                        }}
+                                        className="h-6 w-6 shrink-0 accent-red-500"
+                                      />
 
-                          return (
-                            <div
-                              key={log.id}
-                              className={`rounded-xl px-3 py-2 ${
-                                checked
-                                  ? "bg-red-100 ring-2 ring-red-300"
-                                  : "bg-white"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex min-w-0 items-center gap-3 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(event) => {
-                                      toggleLog(
-                                        log.id,
-                                        shiftPressedRef.current,
-                                        event.target.checked,
-                                      );
-                                    }}
-                                    className="h-6 w-6 shrink-0 accent-red-500"
-                                  />
+                                      <div className="min-w-0">
+                                        <div className="mb-1 text-[11px] font-semibold text-slate-400">
+                                          {isLatestLog
+                                            ? "대표 기록 · 상단 체크와 연동"
+                                            : "이전 기록 · 직접 선택 가능"}
+                                        </div>
 
-                                  <div className="min-w-0">
-                                    <div className="mb-1 text-[11px] font-semibold text-slate-400">
-                                      {isLatestLog
-                                        ? "대표 기록 · 상단 체크와 연동"
-                                        : "이전 기록 · 직접 선택 가능"}
-                                    </div>
+                                        {log.visitorName && (
+                                          <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
+                                            <User
+                                              size={14}
+                                            />
 
-                                    {log.visitorName && (
-                                      <div className="mb-1 flex items-center gap-1 font-semibold text-slate-900">
-                                        <User size={14} />
-                                        인도자: {log.visitorName}
+                                            인도자:{" "}
+                                            {
+                                              log.visitorName
+                                            }
+                                          </div>
+                                        )}
+
+                                        <div className="flex items-center gap-1 text-slate-500">
+                                          <Clock3
+                                            size={14}
+                                          />
+
+                                          {formatDate(
+                                            log.createdAt,
+                                          )}
+                                        </div>
                                       </div>
-                                    )}
-
-                                    <div className="flex items-center gap-1 text-slate-500">
-                                      <Clock3 size={14} />
-                                      {formatDate(log.createdAt)}
                                     </div>
-                                  </div>
-                                </div>
 
-                                <div className="flex shrink-0 items-center gap-1.5">
-                                  {role === "admin" && (
-                                    <button
-                                      onClick={() => startEditVisitDate(log)}
-                                      disabled={updatingDateId === log.id}
-                                      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-                                    >
-                                      <Pencil size={13} />
-                                      수정
-                                    </button>
-                                  )}
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                      {role ===
+                                        "admin" && (
+                                        <button
+                                          onClick={() =>
+                                            startEditVisitDate(
+                                              log,
+                                            )
+                                          }
+                                          disabled={
+                                            updatingDateId ===
+                                            log.id
+                                          }
+                                          className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                                        >
+                                          <Pencil
+                                            size={13}
+                                          />
 
-                                  <button
-                                    onClick={() => handleDeleteLog(log)}
-                                    disabled={deletingId === log.id}
-                                    className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-                                  >
-                                    <Trash2 size={13} />
-                                    {deletingId === log.id ? "삭제 중" : "삭제"}
-                                  </button>
-                                </div>
-                              </div>
+                                          수정
+                                        </button>
+                                      )}
 
-                              {isEditing && (
-                                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                  <div className="mb-2 text-xs font-semibold text-slate-600">
-                                    방문 정보 수정
-                                  </div>
-
-                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                                    <input
-                                      type="text"
-                                      value={editingVisitorName}
-                                      onChange={(event) =>
-                                        setEditingVisitorName(
-                                          event.target.value,
-                                        )
-                                      }
-                                      placeholder="인도자 이름"
-                                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
-                                    />
-
-                                    <input
-                                      type="datetime-local"
-                                      value={editingDateValue}
-                                      onChange={(event) =>
-                                        setEditingDateValue(event.target.value)
-                                      }
-                                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
-                                    />
-
-                                    <div className="flex gap-2">
                                       <button
                                         onClick={() =>
-                                          handleUpdateVisitDate(log)
+                                          handleDeleteLog(
+                                            log,
+                                          )
                                         }
-                                        disabled={updatingDateId === log.id}
-                                        className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow disabled:opacity-50"
+                                        disabled={
+                                          deletingId ===
+                                          log.id
+                                        }
+                                        className="inline-flex items-center gap-1 rounded-lg bg-red-500 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                                       >
-                                        <Save size={15} />
-                                        {updatingDateId === log.id
-                                          ? "저장 중"
-                                          : "저장"}
-                                      </button>
+                                        <Trash2
+                                          size={13}
+                                        />
 
-                                      <button
-                                        onClick={cancelEditVisitDate}
-                                        disabled={updatingDateId === log.id}
-                                        className="inline-flex items-center gap-1 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-600 shadow disabled:opacity-50"
-                                      >
-                                        <X size={15} />
-                                        취소
+                                        {deletingId ===
+                                        log.id
+                                          ? "삭제 중"
+                                          : "삭제"}
                                       </button>
                                     </div>
                                   </div>
+
+                                  {isEditing && (
+                                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                      <div className="mb-2 text-xs font-semibold text-slate-600">
+                                        방문 정보
+                                        수정
+                                      </div>
+
+                                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                        <input
+                                          type="text"
+                                          value={
+                                            editingVisitorName
+                                          }
+                                          onChange={(
+                                            event,
+                                          ) =>
+                                            setEditingVisitorName(
+                                              event
+                                                .target
+                                                .value,
+                                            )
+                                          }
+                                          placeholder="인도자 이름"
+                                          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                        />
+
+                                        <input
+                                          type="datetime-local"
+                                          value={
+                                            editingDateValue
+                                          }
+                                          onChange={(
+                                            event,
+                                          ) =>
+                                            setEditingDateValue(
+                                              event
+                                                .target
+                                                .value,
+                                            )
+                                          }
+                                          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-slate-400"
+                                        />
+
+                                        <div className="flex gap-2">
+                                          <button
+                                            onClick={() =>
+                                              handleUpdateVisitDate(
+                                                log,
+                                              )
+                                            }
+                                            disabled={
+                                              updatingDateId ===
+                                              log.id
+                                            }
+                                            className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow disabled:opacity-50"
+                                          >
+                                            <Save
+                                              size={
+                                                15
+                                              }
+                                            />
+
+                                            {updatingDateId ===
+                                            log.id
+                                              ? "저장 중"
+                                              : "저장"}
+                                          </button>
+
+                                          <button
+                                            onClick={
+                                              cancelEditVisitDate
+                                            }
+                                            disabled={
+                                              updatingDateId ===
+                                              log.id
+                                            }
+                                            className="inline-flex items-center gap-1 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-600 shadow disabled:opacity-50"
+                                          >
+                                            <X
+                                              size={
+                                                15
+                                              }
+                                            />
+
+                                            취소
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                              );
+                            },
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    )}
+                  </div>
+                );
+              },
+            )}
           </div>
         )}
       </div>
