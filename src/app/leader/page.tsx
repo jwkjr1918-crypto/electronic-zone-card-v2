@@ -15,6 +15,7 @@ import {
 import {
   collection,
   doc,
+  documentId,
   getDoc,
   getDocs,
   onSnapshot,
@@ -383,9 +384,14 @@ export default function LeaderPage() {
     useState<Zone[]>([]);
 
   const loadedRegionDataRef =
-    useRef<Partial<Record<RegionGroup, LoadedRegionData>>>(
-      {},
-    );
+    useRef<
+      Partial<
+        Record<
+          RegionGroup,
+          LoadedRegionData
+        >
+      >
+    >({});
 
   const [
     activeZoneIds,
@@ -538,6 +544,13 @@ export default function LeaderPage() {
    * 영해지역/전체를 누르면 해당 데이터가 그때 처음 조회됩니다.
    * 한 번 읽은 지역은 메모리에 캐시하여 다시 탭을 눌러도
    * 같은 데이터를 다시 읽지 않습니다.
+   *
+   * 중요:
+   * visitStats는 region 값이 아니라
+   * zones의 Firestore 문서 ID를 기준으로 연결합니다.
+   *
+   * Firestore의 "in" 쿼리는 한 번에 최대 30개이므로
+   * 구역 ID를 30개씩 나누어 조회합니다.
    * --------------------------------------------------
    */
   useEffect(() => {
@@ -575,20 +588,8 @@ export default function LeaderPage() {
             )
           : zonesRef;
 
-        const statsQuery = regionFilter
-          ? query(
-              statsRef,
-              where("region", "in", regionFilter),
-            )
-          : statsRef;
-
-        const [
-          zoneSnapshot,
-          statsSnapshot,
-        ] = await Promise.all([
-          getDocs(zoneQuery),
-          getDocs(statsQuery),
-        ]);
+        const zoneSnapshot =
+          await getDocs(zoneQuery);
 
         if (cancelled) {
           return;
@@ -603,13 +604,86 @@ export default function LeaderPage() {
             }),
           ) as Zone[];
 
+        /*
+         * --------------------------------------------------
+         * visitStats 조회
+         *
+         * 기존에는 visitStats의 region 필드로 조회했기 때문에
+         * zones.region과 visitStats.region이 조금이라도 다르면
+         * 해당 구역의 방문통계가 누락될 수 있었습니다.
+         *
+         * 이제 실제 zone 문서 ID를 기준으로 조회합니다.
+         * --------------------------------------------------
+         */
+        let statsDocs: typeof zoneSnapshot.docs = [];
+
+        if (
+          selectedRegionGroup === "전체"
+        ) {
+          const statsSnapshot =
+            await getDocs(statsRef);
+
+          statsDocs =
+            statsSnapshot.docs as typeof statsDocs;
+        } else if (
+          zoneData.length > 0
+        ) {
+          const zoneIds =
+            zoneData.map(
+              (zone) =>
+                zone.firestoreId,
+            );
+
+          const chunks: string[][] = [];
+
+          for (
+            let i = 0;
+            i < zoneIds.length;
+            i += 30
+          ) {
+            chunks.push(
+              zoneIds.slice(
+                i,
+                i + 30,
+              ),
+            );
+          }
+
+          const statsSnapshots =
+            await Promise.all(
+              chunks.map(
+                (chunk) =>
+                  getDocs(
+                    query(
+                      statsRef,
+                      where(
+                        documentId(),
+                        "in",
+                        chunk,
+                      ),
+                    ),
+                  ),
+              ),
+            );
+
+          statsDocs =
+            statsSnapshots.flatMap(
+              (snapshot) =>
+                snapshot.docs,
+            ) as typeof statsDocs;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
         const statsMap =
           new Map<
             string,
             VisitStats
           >();
 
-        statsSnapshot.docs.forEach(
+        statsDocs.forEach(
           (statsDoc) => {
             const stats =
               statsDoc.data() as VisitStats;
@@ -660,7 +734,9 @@ export default function LeaderPage() {
           selectedRegionGroup
         ] = loadedData;
 
-        setZones(loadedData.zones);
+        setZones(
+          loadedData.zones,
+        );
 
         console.log(
           `인도자 화면 ${selectedRegionGroup} 구역:`,
@@ -669,9 +745,8 @@ export default function LeaderPage() {
 
         console.log(
           `인도자 화면 ${selectedRegionGroup} 방문통계:`,
-          statsSnapshot.size,
+          statsDocs.length,
         );
-
       } catch (error) {
         if (!cancelled) {
           console.error(
@@ -1165,7 +1240,6 @@ export default function LeaderPage() {
                   후포회중구역 방문 관리 시스템
                 </p>
               </div>
-
             </div>
 
             {duplicateCount >
@@ -1558,7 +1632,6 @@ export default function LeaderPage() {
                               </>
                             )}
                           </div>
-                          
                         </div>
                       </div>
 
