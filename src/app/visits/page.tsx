@@ -147,6 +147,7 @@ function getVisitZoneKey(log: VisitLog) {
 
 function isSameZoneLog(a: VisitLog, b: VisitLog) {
   if (a.zoneId && b.zoneId && a.zoneId === b.zoneId) return true;
+
   if (
     typeof a.zoneNumber === "number" &&
     typeof b.zoneNumber === "number" &&
@@ -296,7 +297,6 @@ export default function VisitsPage() {
     }
   }, [checkingAuth]);
 
-
   useEffect(() => {
     async function fetchZoneCount() {
       try {
@@ -403,6 +403,14 @@ export default function VisitsPage() {
       return new Date(log.createdAt.seconds * 1000) >= sixMonthsAgo;
     }).length;
   }, [visitLogs]);
+
+  const recentSixMonthVisitPercent = useMemo(() => {
+    if (totalZoneCount <= 0) return 0;
+
+    return Math.round(
+      (recentSixMonthVisitCount / totalZoneCount) * 100,
+    );
+  }, [recentSixMonthVisitCount, totalZoneCount]);
 
   const orderedLatestLogIds = useMemo(() => {
     return groupedLogs
@@ -535,8 +543,10 @@ export default function VisitsPage() {
     });
 
     const sixMonthsAgo = addMonths(new Date(), -6);
+
     const recentSixMonthCount = sortedLogs.filter((log) => {
       if (!log.createdAt?.seconds) return false;
+
       return new Date(log.createdAt.seconds * 1000) >= sixMonthsAgo;
     }).length;
 
@@ -561,6 +571,7 @@ export default function VisitsPage() {
 
     logs.forEach((log) => {
       const key = getVisitZoneKey(log);
+
       if (!map.has(key)) {
         map.set(key, log);
       }
@@ -626,6 +637,7 @@ export default function VisitsPage() {
       );
 
       setVisitLogs(nextLogs);
+
       await syncVisitStatsForZone(log, nextLogs);
 
       setEditingLogId(null);
@@ -655,6 +667,7 @@ export default function VisitsPage() {
 
       setVisitLogs(nextLogs);
       setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
+
       await syncVisitStatsForZone(log, nextLogs);
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
@@ -689,6 +702,7 @@ export default function VisitsPage() {
 
     const lockedLogs = targetLogs.filter((targetLog) => {
       const latestLog = visitLogs.find((log) => isSameZoneLog(log, targetLog));
+
       return isVisitLocked(latestLog?.createdAt, visitLockMonths);
     });
 
@@ -696,7 +710,9 @@ export default function VisitsPage() {
       const preview = lockedLogs
         .slice(0, 5)
         .map((log) => {
-          const latestLog = visitLogs.find((item) => isSameZoneLog(item, log));
+          const latestLog = visitLogs.find((item) =>
+            isSameZoneLog(item, log),
+          );
 
           return `${log.zoneNumber ?? ""} ${log.zoneName} - ${formatNextAvailableDate(
             latestLog?.createdAt,
@@ -710,6 +726,7 @@ export default function VisitsPage() {
           lockedLogs.length > 5 ? "\n..." : ""
         }`,
       );
+
       return;
     }
 
@@ -736,6 +753,7 @@ export default function VisitsPage() {
       );
 
       const nowPlaceholder = Timestamp.fromDate(new Date());
+
       const localLogs = targetLogs.map((log) => ({
         ...log,
         id: `local-${Date.now()}-${log.id}`,
@@ -782,6 +800,7 @@ export default function VisitsPage() {
       const affectedZoneLogs = getAffectedZoneLogs(
         visitLogs.filter((log) => selectedLogs.includes(log.id)),
       );
+
       const nextLogs = visitLogs.filter(
         (log) => !selectedLogs.includes(log.id),
       );
@@ -861,7 +880,8 @@ export default function VisitsPage() {
       nextTimestamp = Timestamp.fromDate(nextDate);
     }
 
-    const updateData: Partial<Pick<VisitLog, "visitorName" | "createdAt">> = {};
+    const updateData: Partial<Pick<VisitLog, "visitorName" | "createdAt">> =
+      {};
 
     if (trimmedName) {
       updateData.visitorName = trimmedName;
@@ -909,6 +929,7 @@ export default function VisitsPage() {
       const affectedZoneLogs = getAffectedZoneLogs(
         visitLogs.filter((log) => selectedLogs.includes(log.id)),
       );
+
       const nextLogs = sortVisitLogsDesc(
         visitLogs.map((log) =>
           selectedLogs.includes(log.id)
@@ -1168,6 +1189,7 @@ export default function VisitsPage() {
       }
 
       const serviceYearCells = getTextCells(serviceYearTable);
+
       setCellText(xmlDoc, serviceYearCells[1], String(getServiceYear()));
 
       const originalRows = Array.from(
@@ -1203,9 +1225,12 @@ export default function VisitsPage() {
         const zoneLogs = validLogsByZoneNumber.get(zoneNumber) || [];
 
         const latestCompletedDate =
-          zoneLogs.length > 0 ? zoneLogs[zoneLogs.length - 1].createdAt : null;
+          zoneLogs.length > 0
+            ? zoneLogs[zoneLogs.length - 1].createdAt
+            : null;
 
         setCellText(xmlDoc, firstRowCells[0], String(zoneNumber));
+
         setCellText(
           xmlDoc,
           firstRowCells[1],
@@ -1223,11 +1248,13 @@ export default function VisitsPage() {
             firstRowCells[visitorNameCellIndex],
             log?.visitorName || "",
           );
+
           setCellText(
             xmlDoc,
             secondRowCells[assignedDateCellIndex],
             formatWordDate(log?.createdAt),
           );
+
           setCellText(
             xmlDoc,
             secondRowCells[completedDateCellIndex],
@@ -1265,6 +1292,7 @@ export default function VisitsPage() {
       });
 
       const today = new Date();
+
       const fileDate = `${today.getFullYear()}-${String(
         today.getMonth() + 1,
       ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -1332,8 +1360,13 @@ export default function VisitsPage() {
                   <h1 className="text-2xl font-bold">방문 기록 관리</h1>
 
                   <p className="mt-1 text-sm text-slate-300">
-                    총 {visitLogs.length}개 기록 / 현재 {filteredLogs.length}개
-                    표시 / {groupedLogs.length}개 구역
+                    총 {visitLogs.length}개 기록 / 최근 6개월 방문{" "}
+                    <span className="font-bold text-white">
+                      {recentSixMonthVisitCount}회 (
+                      {recentSixMonthVisitPercent}%)
+                    </span>
+                    {" / "}현재 {filteredLogs.length}개 표시 /{" "}
+                    {totalZoneCount}개 구역
                   </p>
                 </div>
 
@@ -1441,7 +1474,9 @@ export default function VisitsPage() {
               {role === "admin" && (
                 <button
                   onClick={handleUpdateSelectedLogs}
-                  disabled={updatingSelectedLogs || selectedLogs.length === 0}
+                  disabled={
+                    updatingSelectedLogs || selectedLogs.length === 0
+                  }
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow disabled:opacity-50"
                 >
                   <Pencil size={16} />
@@ -1471,7 +1506,9 @@ export default function VisitsPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-2xl bg-white p-6 shadow">불러오는 중...</div>
+          <div className="rounded-2xl bg-white p-6 shadow">
+            불러오는 중...
+          </div>
         ) : groupedLogs.length === 0 ? (
           <div className="rounded-2xl bg-white p-8 text-center text-slate-400 shadow">
             방문 기록이 없습니다.
