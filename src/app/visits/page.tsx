@@ -22,6 +22,7 @@ import {
   writeBatch,
   getDoc,
   updateDoc,
+  setDoc,
   Timestamp,
 } from "firebase/firestore";
 
@@ -487,6 +488,77 @@ export default function VisitsPage() {
     setEditingVisitorName("");
   }
 
+  /**
+   * visitLogs가 수정/삭제된 뒤 해당 구역의 visitStats를 다시 계산합니다.
+   * 인도자 화면은 visitLogs가 아니라 visitStats를 기준으로 방문 필요 여부를
+   * 판단하므로, 방문기록 변경 시 두 데이터를 함께 맞춰줍니다.
+   */
+  async function syncVisitStatsForZone(
+    zoneLog: VisitLog,
+    sourceLogs: VisitLog[],
+  ) {
+    const zoneId = zoneLog.zoneId?.trim();
+
+    if (!zoneId) {
+      console.warn("visitStats 동기화 건너뜀: zoneId가 없습니다.", zoneLog);
+      return;
+    }
+
+    const zoneLogs = sourceLogs
+      .filter((log) => isSameZoneLog(log, zoneLog))
+      .filter((log) => Boolean(log.createdAt?.seconds));
+
+    const sortedLogs = sortVisitLogsDesc(zoneLogs);
+    const latestLog = sortedLogs[0];
+
+    const monthlyCounts: Record<string, number> = {};
+
+    sortedLogs.forEach((log) => {
+      if (!log.createdAt?.seconds) return;
+
+      const date = new Date(log.createdAt.seconds * 1000);
+      const monthKey = `${date.getFullYear()}-${String(
+        date.getMonth() + 1,
+      ).padStart(2, "0")}`;
+
+      monthlyCounts[monthKey] = (monthlyCounts[monthKey] ?? 0) + 1;
+    });
+
+    const sixMonthsAgo = addMonths(new Date(), -6);
+    const recentSixMonthCount = sortedLogs.filter((log) => {
+      if (!log.createdAt?.seconds) return false;
+      return new Date(log.createdAt.seconds * 1000) >= sixMonthsAgo;
+    }).length;
+
+    await setDoc(doc(db, "visitStats", zoneId), {
+      zoneId,
+      zoneName: latestLog?.zoneName ?? zoneLog.zoneName,
+      zoneNumber:
+        typeof (latestLog?.zoneNumber ?? zoneLog.zoneNumber) === "number"
+          ? (latestLog?.zoneNumber ?? zoneLog.zoneNumber)
+          : null,
+      region: latestLog?.region ?? zoneLog.region,
+      visitCount: zoneLogs.length,
+      lastVisitedAt: latestLog?.createdAt ?? null,
+      recentSixMonthCount,
+      monthlyCounts,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  function getAffectedZoneLogs(logs: VisitLog[]) {
+    const map = new Map<string, VisitLog>();
+
+    logs.forEach((log) => {
+      const key = getVisitZoneKey(log);
+      if (!map.has(key)) {
+        map.set(key, log);
+      }
+    });
+
+    return Array.from(map.values());
+  }
+
   async function handleUpdateVisitDate(log: VisitLog) {
     if (!editingDateValue) {
       alert("수정할 방문 날짜를 선택해주세요.");
@@ -531,19 +603,20 @@ export default function VisitsPage() {
         visitorName: nextVisitorName,
       });
 
-      setVisitLogs((prev) =>
-        sortVisitLogsDesc(
-          prev.map((item) =>
-            item.id === log.id
-              ? {
-                  ...item,
-                  createdAt: nextTimestamp,
-                  visitorName: nextVisitorName,
-                }
-              : item,
-          ),
+      const nextLogs = sortVisitLogsDesc(
+        visitLogs.map((item) =>
+          item.id === log.id
+            ? {
+                ...item,
+                createdAt: nextTimestamp,
+                visitorName: nextVisitorName,
+              }
+            : item,
         ),
       );
+
+      setVisitLogs(nextLogs);
+      await syncVisitStatsForZone(log, nextLogs);
 
       setEditingLogId(null);
       setEditingDateValue("");
@@ -568,9 +641,11 @@ export default function VisitsPage() {
 
       await deleteDoc(doc(db, "visitLogs", log.id));
 
-      setVisitLogs((prev) => prev.filter((item) => item.id !== log.id));
+      const nextLogs = visitLogs.filter((item) => item.id !== log.id);
 
+      setVisitLogs(nextLogs);
       setSelectedLogs((prev) => prev.filter((id) => id !== log.id));
+      await syncVisitStatsForZone(log, nextLogs);
     } catch (error) {
       console.error("방문 기록 삭제 에러:", error);
       alert("삭제 실패");
@@ -658,7 +733,14 @@ export default function VisitsPage() {
         createdAt: nowPlaceholder,
       }));
 
-      setVisitLogs((prev) => sortVisitLogsDesc([...localLogs, ...prev]));
+      const nextLogs = sortVisitLogsDesc([...localLogs, ...visitLogs]);
+
+      setVisitLogs(nextLogs);
+
+      await Promise.all(
+        targetLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
+      );
+
       setSelectedLogs([]);
       setOpenZone(null);
 
@@ -678,13 +760,21 @@ export default function VisitsPage() {
     }
 
     const ok = confirm(
-      `선택한 ${selectedLogs.length}개 방문 기록을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
+      `선택한 ${selectedLogs.length}개 방문 기록을 삭제할까요?
+이 작업은 되돌릴 수 없습니다.`,
     );
 
     if (!ok) return;
 
     try {
       setDeletingSelected(true);
+
+      const affectedZoneLogs = getAffectedZoneLogs(
+        visitLogs.filter((log) => selectedLogs.includes(log.id)),
+      );
+      const nextLogs = visitLogs.filter(
+        (log) => !selectedLogs.includes(log.id),
+      );
 
       const batch = writeBatch(db);
 
@@ -694,8 +784,10 @@ export default function VisitsPage() {
 
       await batch.commit();
 
-      setVisitLogs((prev) =>
-        prev.filter((log) => !selectedLogs.includes(log.id)),
+      setVisitLogs(nextLogs);
+
+      await Promise.all(
+        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
       );
 
       setSelectedLogs([]);
@@ -804,17 +896,24 @@ export default function VisitsPage() {
 
       await batch.commit();
 
-      setVisitLogs((prev) =>
-        sortVisitLogsDesc(
-          prev.map((log) =>
-            selectedLogs.includes(log.id)
-              ? {
-                  ...log,
-                  ...updateData,
-                }
-              : log,
-          ),
+      const affectedZoneLogs = getAffectedZoneLogs(
+        visitLogs.filter((log) => selectedLogs.includes(log.id)),
+      );
+      const nextLogs = sortVisitLogsDesc(
+        visitLogs.map((log) =>
+          selectedLogs.includes(log.id)
+            ? {
+                ...log,
+                ...updateData,
+              }
+            : log,
         ),
+      );
+
+      setVisitLogs(nextLogs);
+
+      await Promise.all(
+        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, nextLogs)),
       );
 
       alert("선택한 방문 기록이 수정되었습니다.");
@@ -844,7 +943,14 @@ export default function VisitsPage() {
 
       await batch.commit();
 
+      const affectedZoneLogs = getAffectedZoneLogs(visitLogs);
+
       setVisitLogs([]);
+
+      await Promise.all(
+        affectedZoneLogs.map((log) => syncVisitStatsForZone(log, [])),
+      );
+
       setSelectedLogs([]);
       setOpenZone(null);
 
