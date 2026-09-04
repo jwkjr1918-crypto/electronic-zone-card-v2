@@ -18,7 +18,9 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
+  query,
   Timestamp,
+  where,
 } from "firebase/firestore";
 
 import Link from "next/link";
@@ -111,7 +113,6 @@ interface VisitStats {
   zoneNumber?: number | null;
   region?: string;
   visitCount?: number;
-  recentSixMonthCount?: number;
   lastVisitedAt?: Timestamp | null;
   monthlyVisits?: Record<string, number>;
 }
@@ -128,6 +129,10 @@ interface HomePageState {
   sortType?: SortType;
   showRecentOnly?: boolean;
   scrollY?: number;
+}
+
+interface LoadedRegionData {
+  zones: Zone[];
 }
 
 function isRegionGroup(
@@ -377,10 +382,10 @@ export default function LeaderPage() {
   const [zones, setZones] =
     useState<Zone[]>([]);
 
-  const [
-    recentSixMonthVisitCount,
-    setRecentSixMonthVisitCount,
-  ] = useState(0);
+  const loadedRegionDataRef =
+    useRef<Partial<Record<RegionGroup, LoadedRegionData>>>(
+      {},
+    );
 
   const [
     activeZoneIds,
@@ -527,29 +532,67 @@ export default function LeaderPage() {
 
   /*
    * --------------------------------------------------
-   * 구역 + 방문 통계 조회
+   * 선택된 지역의 구역 + 방문 통계 조회
+   *
+   * 기본값은 후포지역이므로 처음에는 후포지역만 읽습니다.
+   * 영해지역/전체를 누르면 해당 데이터가 그때 처음 조회됩니다.
+   * 한 번 읽은 지역은 메모리에 캐시하여 다시 탭을 눌러도
+   * 같은 데이터를 다시 읽지 않습니다.
    * --------------------------------------------------
    */
   useEffect(() => {
-    async function fetchZonesAndVisitStats() {
+    let cancelled = false;
+
+    async function fetchSelectedRegionData() {
       try {
+        const cached =
+          loadedRegionDataRef.current[
+            selectedRegionGroup
+          ];
+
+        if (cached) {
+          setZones(cached.zones);
+          return;
+        }
+
+        const regionFilter =
+          selectedRegionGroup === "후포지역"
+            ? HUPO_REGIONS
+            : selectedRegionGroup === "영해지역"
+              ? YEONGHAE_REGIONS
+              : null;
+
+        const zonesRef =
+          collection(db, "zones");
+
+        const statsRef =
+          collection(db, "visitStats");
+
+        const zoneQuery = regionFilter
+          ? query(
+              zonesRef,
+              where("region", "in", regionFilter),
+            )
+          : zonesRef;
+
+        const statsQuery = regionFilter
+          ? query(
+              statsRef,
+              where("region", "in", regionFilter),
+            )
+          : statsRef;
+
         const [
           zoneSnapshot,
           statsSnapshot,
         ] = await Promise.all([
-          getDocs(
-            collection(
-              db,
-              "zones",
-            ),
-          ),
-          getDocs(
-            collection(
-              db,
-              "visitStats",
-            ),
-          ),
+          getDocs(zoneQuery),
+          getDocs(statsQuery),
         ]);
+
+        if (cancelled) {
+          return;
+        }
 
         const zoneData =
           zoneSnapshot.docs.map(
@@ -609,58 +652,42 @@ export default function LeaderPage() {
             },
           );
 
-        const recentSixMonthVisitCount =
-          statsSnapshot.docs.reduce(
-            (
-              total,
-              statsDoc,
-            ) => {
-              const stats =
-                statsDoc.data() as VisitStats;
+        const loadedData: LoadedRegionData = {
+          zones: zoneDataWithVisit,
+        };
 
-              return (
-                total +
-                Number(
-                  stats.recentSixMonthCount ??
-                    0,
-                )
-              );
-            },
-            0,
-          );
+        loadedRegionDataRef.current[
+          selectedRegionGroup
+        ] = loadedData;
 
-        setZones(
-          zoneDataWithVisit,
-        );
-
-        setRecentSixMonthVisitCount(
-          recentSixMonthVisitCount,
-        );
+        setZones(loadedData.zones);
 
         console.log(
-          "인도자 화면 구역:",
+          `인도자 화면 ${selectedRegionGroup} 구역:`,
           zoneData.length,
         );
 
         console.log(
-          "인도자 화면 방문통계:",
+          `인도자 화면 ${selectedRegionGroup} 방문통계:`,
           statsSnapshot.size,
         );
 
-        console.log(
-          "최근 6개월 방문횟수:",
-          recentSixMonthVisitCount,
-        );
       } catch (error) {
-        console.error(
-          "구역/방문통계 조회 에러:",
-          error,
-        );
+        if (!cancelled) {
+          console.error(
+            "구역/방문통계 조회 에러:",
+            error,
+          );
+        }
       }
     }
 
-    fetchZonesAndVisitStats();
-  }, []);
+    fetchSelectedRegionData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegionGroup]);
 
   /*
    * --------------------------------------------------
@@ -1083,18 +1110,6 @@ export default function LeaderPage() {
       visitLockMonths,
     ]);
 
-  const totalZoneCount =
-    zones.length;
-
-  const recentSixMonthVisitPercent =
-    totalZoneCount > 0
-      ? Math.round(
-          (recentSixMonthVisitCount /
-            totalZoneCount) *
-            100,
-        )
-      : 0;
-
   function saveStateBeforeNavigation() {
     saveHomeState({
       search,
@@ -1151,44 +1166,6 @@ export default function LeaderPage() {
                 </p>
               </div>
 
-              <div className="shrink-0 rounded-full bg-white px-2.5 py-1.5 text-right shadow-sm ring-1 ring-slate-200 sm:min-w-[170px] sm:rounded-2xl sm:px-3 sm:py-2">
-                <div className="text-[10px] font-bold leading-tight text-slate-700 sm:hidden">
-                  최근6개월
-                  <br />
-                  {recentSixMonthVisitCount}/
-                  {totalZoneCount}{" "}
-                  ·{" "}
-                  {recentSixMonthVisitPercent}
-                  %
-                </div>
-
-                <div className="hidden sm:block">
-                  <div className="text-[11px] font-semibold text-slate-500 sm:text-xs">
-                    최근 6개월 방문완료
-                  </div>
-
-                  <div className="mt-0.5 text-lg font-black text-slate-900 sm:text-xl">
-                    {
-                      recentSixMonthVisitCount
-                    }
-
-                    <span className="mx-1 text-sm font-bold text-slate-400">
-                      /
-                    </span>
-
-                    <span className="text-sm font-bold text-slate-500">
-                      {totalZoneCount}
-                    </span>
-                  </div>
-
-                  <div className="text-xs font-bold text-emerald-700 sm:text-sm">
-                    {
-                      recentSixMonthVisitPercent
-                    }
-                    %
-                  </div>
-                </div>
-              </div>
             </div>
 
             {duplicateCount >

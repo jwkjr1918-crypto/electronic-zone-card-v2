@@ -394,6 +394,16 @@ export default function VisitsPage() {
     });
   }, [filteredLogs, visitLogSortType]);
 
+  const recentSixMonthVisitCount = useMemo(() => {
+    const sixMonthsAgo = addMonths(new Date(), -6);
+
+    return visitLogs.filter((log) => {
+      if (!log.createdAt?.seconds) return false;
+
+      return new Date(log.createdAt.seconds * 1000) >= sixMonthsAgo;
+    }).length;
+  }, [visitLogs]);
+
   const orderedLatestLogIds = useMemo(() => {
     return groupedLogs
       .map((group) => group.latestLog?.id)
